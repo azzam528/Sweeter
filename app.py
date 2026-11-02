@@ -1,6 +1,7 @@
 import os
 import hashlib
 import jwt
+import warnings
 
 from datetime import datetime, timedelta, timezone
 from bson import ObjectId
@@ -27,12 +28,34 @@ app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["UPLOAD_FOLDER"] = "./static/profile_pics"
 
+# ==========================================
+# CONFIGURATION & SECRET_KEY VALIDATION
+# ==========================================
+
+APP_ENV = os.getenv("APP_ENV", "development").lower()
+IS_PRODUCTION = (APP_ENV == "production")
+
 SECRET_KEY = os.getenv("SECRET_KEY")
 
 if not SECRET_KEY:
     raise RuntimeError(
-        "SECRET_KEY belum diatur di file .env"
+        "CRITICAL: SECRET_KEY belum diatur di file .env. Aplikasi tidak dapat dijalankan tanpa SECRET_KEY."
     )
+
+SECRET_KEY_BYTES = SECRET_KEY.encode("utf-8")
+if len(SECRET_KEY_BYTES) < 32:
+    warning_msg = (
+        f"[SECURITY WARNING] Panjang SECRET_KEY ({len(SECRET_KEY_BYTES)} byte) kurang dari 32 byte "
+        "yang direkomendasikan RFC 7518 Section 3.2 untuk HMAC-SHA256 (HS256). "
+        "Untuk keamanan maksimal di production, silakan rotasi SECRET_KEY ke minimal 32 byte (256-bit). "
+        "Panduan rotasi tersedia di docs/security-configuration.md."
+    )
+    if IS_PRODUCTION:
+        raise RuntimeError(
+            "CRITICAL: Pada environment production (APP_ENV=production), SECRET_KEY wajib memiliki panjang minimal 32 byte (256-bit)."
+        )
+    else:
+        warnings.warn(warning_msg, UserWarning, stacklevel=2)
 
 app.config["SECRET_KEY"] = SECRET_KEY
 
@@ -52,7 +75,7 @@ def get_current_user_from_token():
             algorithms=['HS256']
         )
         return payload
-    except (jwt.ExpiredSignatureError, jwt.exceptions.DecodeError, Exception):
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError, Exception):
         return None
 
 
@@ -74,7 +97,7 @@ def home():
     except jwt.ExpiredSignatureError:
         msg ='your token has expired'
         return redirect(url_for('login', msg=msg))
-    except jwt.exceptions.DecodeError:
+    except (jwt.exceptions.DecodeError, jwt.exceptions.InvalidTokenError, jwt.exceptions.PyJWTError):
         msg ='There was a problem logging you in'
         return redirect(url_for('login', msg=msg))
     
@@ -98,7 +121,7 @@ def user(username):
             {'_id' : False}
         )
         return render_template('user.html',user_info=user_info, status=status)
-    except (jwt.ExpiredSignatureError, jwt.exceptions.DecodeError):
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))
     
 @app.route("/sign_in", methods=["POST"])
@@ -116,17 +139,27 @@ def sign_in():
     if result:
         payload = {
             "id": username_receive,
-            # the token will be valid for 24 hours
-            "exp": datetime.utcnow() + timedelta(seconds=60 * 60 * 24),
+            # token berlaku 24 jam (menggunakan datetime timezone UTC standar)
+            "exp": datetime.now(timezone.utc) + timedelta(seconds=60 * 60 * 24),
         }
         token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
-        return jsonify(
+        response = jsonify(
             {
                 "result": "success",
                 "token": token,
             }
         )
+        # Menetapkan cookie di response dengan SameSite=Lax dan secure sesuai environment
+        response.set_cookie(
+            "mytoken",
+            token,
+            max_age=60 * 60 * 24,
+            path="/",
+            samesite="Lax",
+            secure=IS_PRODUCTION
+        )
+        return response
     # Let's also handle the case where the id and
     # password combination cannot be found
     else:
@@ -136,6 +169,13 @@ def sign_in():
                 "msg": "We could not find a user with that id/password combination",
             }
         )
+
+@app.route("/sign_out", methods=["POST", "GET"])
+def sign_out():
+    """Endpoint logout server-side untuk menghapus cookie 'mytoken'."""
+    response = redirect(url_for("login"))
+    response.delete_cookie("mytoken", path="/")
+    return response
 
 @app.route("/sign_up/save", methods=["POST"])
 def sign_up():
@@ -217,7 +257,7 @@ def update_profile():
             'msg': 'Your profile has been updated'
         })
     
-    except (jwt.ExpiredSignatureError, jwt.exceptions.DecodeError):
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         # Jika token tidak valid atau sudah kadaluarsa, redirect ke home
         return redirect(url_for('home'))
 
@@ -246,7 +286,7 @@ def posting():
             'result': 'success',
             'msg' : 'Posting successfull'
         })
-    except (jwt.ExpiredSignatureError, jwt.exceptions.DecodeError):
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))    
     
     
@@ -311,7 +351,7 @@ def get_posts():
             'msg' : ' Successfully fetched all posts',
             'posts': posts,
         })
-    except (jwt.ExpiredSignatureError, jwt.exceptions.DecodeError):
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))    
     
     
@@ -371,7 +411,7 @@ def update_like():
            
                
         
-    except (jwt.ExpiredSignatureError, jwt.exceptions.DecodeError):
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))    
 
 
@@ -623,7 +663,7 @@ def secret():
         )
         user_info = db.users.find_one({'username': payload.get('id')})
         return render_template('secret.html' , user_info=user_info)
-    except (jwt.ExpiredSignatureError, jwt.exceptions.DecodeError):
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))  
 
 if __name__ == "__main__":
