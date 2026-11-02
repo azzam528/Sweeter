@@ -1,9 +1,10 @@
-
 import os
 import hashlib
 import jwt
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from bson import ObjectId
+from bson.errors import InvalidId
 
 from flask import (
     Flask,
@@ -34,6 +35,26 @@ if not SECRET_KEY:
     )
 
 app.config["SECRET_KEY"] = SECRET_KEY
+
+
+def get_current_user_from_token():
+    """
+    Mengambil dan memvalidasi token JWT dari cookie 'mytoken'.
+    Mengembalikan payload dict jika valid, atau None jika tidak valid/kadaluarsa/hilang.
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return None
+    try:
+        payload = jwt.decode(
+            token_receive,
+            SECRET_KEY,
+            algorithms=['HS256']
+        )
+        return payload
+    except (jwt.ExpiredSignatureError, jwt.exceptions.DecodeError, Exception):
+        return None
+
 
 # Lanjutkan dengan seluruh route lama kamu di bawah ini.
 # Jangan menghapus route yang sudah ada.
@@ -239,6 +260,18 @@ def get_posts():
             algorithms=['HS256']
         )
         posts = list(db.posts.find({}).sort('date', -1).limit(20))
+
+        # Batch count komentar untuk seluruh postingan yang diambil dalam satu query agregasi
+        post_ids = [str(post['_id']) for post in posts]
+        comment_counts = {}
+        if post_ids:
+            pipeline = [
+                {'$match': {'post_id': {'$in': post_ids}}},
+                {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
+            ]
+            for item in db.comments.aggregate(pipeline):
+                comment_counts[item['_id']] = item['count']
+
         for post in posts:
             post['_id'] = str(post['_id'])    
             post['count_heart'] = db.likes.count_documents({
@@ -270,6 +303,9 @@ def get_posts():
                 'type' : 'thumbs',
                 'username' : payload.get('id')
             }))
+            # Jumlah total komentar (termasuk reply dan soft-deleted)
+            post['count_comments'] = comment_counts.get(post['_id'], 0)
+
         return jsonify({
             'result': 'success',
             'msg' : ' Successfully fetched all posts',
@@ -337,6 +373,241 @@ def update_like():
         
     except (jwt.ExpiredSignatureError, jwt.exceptions.DecodeError):
         return redirect(url_for('home'))    
+
+
+# ==========================================
+# COMMENT & REPLY SYSTEM API ENDPOINTS
+# ==========================================
+
+@app.route('/create_comment', methods=['POST'])
+def create_comment():
+    """
+    Membuat komentar utama atau balasan (reply/nested reply) pada postingan.
+    Mengautentikasi pengguna melalui JWT pada cookie 'mytoken'.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Authentication token is missing, expired, or invalid'
+        }), 401
+
+    username = payload.get('id')
+    user_info = db.users.find_one({'username': username})
+    if not user_info:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'User profile not found'
+        }), 404
+
+    post_id_receive = request.form.get('post_id_give', '').strip()
+    content_receive = request.form.get('content_give', '').strip()
+    parent_id_receive = request.form.get('parent_comment_id_give')
+    if parent_id_receive is not None:
+        parent_id_receive = parent_id_receive.strip()
+        if parent_id_receive == '' or parent_id_receive.lower() == 'null':
+            parent_id_receive = None
+
+    # 1. Validasi format dan keberadaan post_id
+    if not post_id_receive or not ObjectId.is_valid(post_id_receive):
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Invalid post ID format'
+        }), 400
+
+    target_post = db.posts.find_one({'_id': ObjectId(post_id_receive)})
+    if not target_post:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Target post not found'
+        }), 404
+
+    # 2. Validasi konten komentar
+    if not content_receive:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Comment content cannot be empty'
+        }), 400
+
+    if len(content_receive) > 2000:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Comment content exceeds maximum length of 2000 characters'
+        }), 400
+
+    # 3. Validasi parent_comment_id jika merupakan reply
+    parent_comment_id = None
+    if parent_id_receive:
+        if not ObjectId.is_valid(parent_id_receive):
+            return jsonify({
+                'result': 'fail',
+                'msg': 'Invalid parent comment ID format'
+            }), 400
+
+        parent_comment = db.comments.find_one({'_id': ObjectId(parent_id_receive)})
+        if not parent_comment:
+            return jsonify({
+                'result': 'fail',
+                'msg': 'Parent comment not found'
+            }), 404
+
+        # Pastikan komentar induk berasal dari postingan yang sama
+        if str(parent_comment.get('post_id')) != str(post_id_receive):
+            return jsonify({
+                'result': 'fail',
+                'msg': 'Parent comment does not belong to the specified post'
+            }), 400
+
+        parent_comment_id = str(parent_comment['_id'])
+
+    # 4. Buat dokumen komentar baru
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    doc = {
+        'post_id': str(post_id_receive),
+        'parent_comment_id': parent_comment_id,
+        'username': username,
+        'profile_name': user_info.get('profile_name', username),
+        'profile_pic_real': user_info.get('profile_pic_real', 'profile_pics/profile_placeholder.png'),
+        'content': content_receive,
+        'created_at': now_iso,
+        'updated_at': None,
+        'is_deleted': False
+    }
+
+    result = db.comments.insert_one(doc)
+    doc['_id'] = str(result.inserted_id)
+    doc['is_mine'] = True
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Comment created successfully',
+        'comment': doc
+    }), 201
+
+
+@app.route('/get_comments', methods=['GET'])
+def get_comments():
+    """
+    Mengambil seluruh komentar dari suatu postingan, diurutkan kronologis.
+    Memeriksa token JWT untuk menentukan flag 'is_mine' bagi pengguna aktif.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Authentication token is missing, expired, or invalid'
+        }), 401
+
+    current_user = payload.get('id')
+    post_id_receive = request.args.get('post_id_give', '').strip()
+
+    # 1. Validasi format dan keberadaan post_id
+    if not post_id_receive or not ObjectId.is_valid(post_id_receive):
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Invalid post ID format'
+        }), 400
+
+    target_post = db.posts.find_one({'_id': ObjectId(post_id_receive)})
+    if not target_post:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Target post not found'
+        }), 404
+
+    # 2. Ambil komentar terurut ascending berdasarkan waktu pembuatan
+    comments_cursor = db.comments.find({'post_id': str(post_id_receive)}).sort('created_at', 1)
+    comments_list = []
+    for c in comments_cursor:
+        is_deleted = bool(c.get('is_deleted', False))
+        is_mine = (c.get('username') == current_user)
+        # Sembunyikan konten asli jika komentar telah dihapus (soft delete)
+        content_display = "[Komentar ini telah dihapus oleh pengguna]" if is_deleted else c.get('content', '')
+
+        comments_list.append({
+            '_id': str(c['_id']),
+            'post_id': str(c.get('post_id')),
+            'parent_comment_id': str(c.get('parent_comment_id')) if c.get('parent_comment_id') else None,
+            'username': c.get('username'),
+            'profile_name': c.get('profile_name'),
+            'profile_pic_real': c.get('profile_pic_real'),
+            'content': content_display,
+            'created_at': c.get('created_at'),
+            'updated_at': c.get('updated_at'),
+            'is_deleted': is_deleted,
+            'is_mine': is_mine
+        })
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Comments fetched successfully',
+        'comments': comments_list
+    }), 200
+
+
+@app.route('/delete_comment', methods=['POST'])
+def delete_comment():
+    """
+    Menghapus komentar milik pengguna aktif menggunakan soft delete (is_deleted: True).
+    Mempertahankan integritas relasi nested reply.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Authentication token is missing, expired, or invalid'
+        }), 401
+
+    current_user = payload.get('id')
+    comment_id_receive = request.form.get('comment_id_give', '').strip()
+
+    # 1. Validasi comment_id
+    if not comment_id_receive or not ObjectId.is_valid(comment_id_receive):
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Invalid comment ID format'
+        }), 400
+
+    comment = db.comments.find_one({'_id': ObjectId(comment_id_receive)})
+    if not comment:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Comment not found'
+        }), 404
+
+    # 2. Otorisasi kepemilikan komentar
+    if comment.get('username') != current_user:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'You do not have permission to delete this comment'
+        }), 403
+
+    # 3. Cek apakah sudah pernah dihapus
+    if comment.get('is_deleted', False):
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Comment is already deleted'
+        }), 400
+
+    # 4. Soft delete
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    db.comments.update_one(
+        {'_id': ObjectId(comment_id_receive)},
+        {
+            '$set': {
+                'is_deleted': True,
+                'content': '[Komentar ini telah dihapus oleh pengguna]',
+                'updated_at': now_iso
+            }
+        }
+    )
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Comment deleted successfully'
+    }), 200
+
+
 @app.route('/about',methods=['GET'])
 def about():
     return render_template('about.html')

@@ -1,5 +1,5 @@
-
 Flask
 PyJWT
 pymongo[srv]
 Werkzeug
+python-dotenv
