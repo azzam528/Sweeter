@@ -1,6 +1,5 @@
 * {
     font-family: 'Noto Serif Display', serif;
-
 }
 
 body {
@@ -61,4 +60,124 @@ input::-webkit-calendar-indicator {
 .logo-text {
     font-family: 'Stylish', sans-serif;
     font-size: larger;
+}
+
+/* ========================================================
+   COMMENT & REPLY SYSTEM STYLES
+   ======================================================== */
+
+.comment-divider {
+    margin: 0.65rem 0;
+    background-color: #ebdada;
+    height: 1px;
+    border: none;
+}
+
+.comment-section {
+    margin-top: 0.4rem;
+    padding-top: 0.1rem;
+}
+
+.comment-form .comment-input,
+.reply-box .reply-input {
+    border-color: #d6bcbc;
+    box-shadow: none;
+    font-size: 0.825rem;
+}
+
+.comment-form .comment-input:focus,
+.reply-box .reply-input:focus {
+    border-color: #583030;
+    box-shadow: 0 0 0 0.125em rgba(88, 48, 48, 0.25);
+}
+
+.comment-list {
+    margin-top: 0.5rem;
+}
+
+.comment-item {
+    padding: 0.35rem 0 !important;
+    border-top: none !important;
+    margin-top: 0.25rem !important;
+}
+
+.comment-avatar {
+    width: 24px;
+    height: 24px;
+    object-fit: cover;
+}
+
+.comment-content-box {
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.comment-content-text {
+    font-size: 0.85rem;
+    color: #363636;
+    white-space: pre-wrap;
+}
+
+.comment-actions {
+    margin-top: 0.1rem;
+    font-size: 0.75rem;
+}
+
+.comment-actions .level-item {
+    margin-right: 0.75rem;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.comment-actions a:hover {
+    text-decoration: underline;
+}
+
+/* Visual indentation for nested replies */
+.comment-reply-depth-1 {
+    margin-left: 1.25rem !important;
+    padding-left: 0.5rem !important;
+    border-left: 2px solid #ecd8d8;
+}
+
+.comment-reply-depth-2 {
+    margin-left: 1rem !important;
+    padding-left: 0.5rem !important;
+    border-left: 2px solid #dfc5c5;
+}
+
+/* Deeper levels (>= 3) remain at depth-2 indentation */
+.reply-context {
+    display: inline-block;
+    margin-bottom: 0.15rem;
+}
+
+.reply-box {
+    background-color: #faf5f5;
+    border: 1px solid #ebdada;
+    border-radius: 6px;
+}
+
+.comment-deleted-text {
+    font-style: italic;
+    color: #8c8c8c;
+}
+
+.btn-toggle-comment {
+    cursor: pointer;
+}
+
+.btn-toggle-comment:hover {
+    opacity: 0.85;
+}
+
+@media screen and (max-width: 768px) {
+    .comment-reply-depth-1 {
+        margin-left: 0.65rem !important;
+        padding-left: 0.35rem !important;
+    }
+    .comment-reply-depth-2 {
+        margin-left: 0.5rem !important;
+        padding-left: 0.35rem !important;
+    }
 }
