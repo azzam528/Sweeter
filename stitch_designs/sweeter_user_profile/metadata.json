@@ -1,0 +1,17 @@
+{
+  "deviceType": "DESKTOP",
+  "height": "4216",
+  "htmlCode": {
+    "downloadUrl": "https://stitch.googleapis.com/v1/projects/12579807835458536573/files/92ef900c6e6a49e58d72e2fdf1d8d8d1:download",
+    "mimeType": "text/html",
+    "name": "projects/12579807835458536573/screens/92ef900c6e6a49e58d72e2fdf1d8d8d1/fileEntries/html"
+  },
+  "name": "projects/12579807835458536573/screens/92ef900c6e6a49e58d72e2fdf1d8d8d1",
+  "screenshot": {
+    "downloadUrl": "https://stitch.googleapis.com/v1/projects/12579807835458536573/files/screenshot_00065f9ce1d30aef07e0044dd912e614:download",
+    "mimeType": "image/png",
+    "name": "projects/12579807835458536573/screens/92ef900c6e6a49e58d72e2fdf1d8d8d1/fileEntries/screenshot"
+  },
+  "title": "Sweeter \u2014 User Profile",
+  "width": "2560"
+}
