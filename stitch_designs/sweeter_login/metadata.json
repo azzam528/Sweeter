@@ -1,0 +1,17 @@
+{
+  "deviceType": "DESKTOP",
+  "height": "2048",
+  "htmlCode": {
+    "downloadUrl": "https://stitch.googleapis.com/v1/projects/12579807835458536573/files/0510572e8f9e486aa950e26008383c4e:download",
+    "mimeType": "text/html",
+    "name": "projects/12579807835458536573/screens/0510572e8f9e486aa950e26008383c4e/fileEntries/html"
+  },
+  "name": "projects/12579807835458536573/screens/0510572e8f9e486aa950e26008383c4e",
+  "screenshot": {
+    "downloadUrl": "https://stitch.googleapis.com/v1/projects/12579807835458536573/files/screenshot_00065f9cdf5f15de02deab771d194b35:download",
+    "mimeType": "image/png",
+    "name": "projects/12579807835458536573/screens/0510572e8f9e486aa950e26008383c4e/fileEntries/screenshot"
+  },
+  "title": "Sweeter \u2014 Login",
+  "width": "2560"
+}
