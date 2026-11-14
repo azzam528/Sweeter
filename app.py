@@ -93,6 +93,25 @@ def home():
             algorithms=['HS256']
         )
         user_info = db.users.find_one({'username' : payload.get('id')})
+        return render_template('post.html', user_info=user_info)
+    except jwt.ExpiredSignatureError:
+        msg ='your token has expired'
+        return redirect(url_for('login', msg=msg))
+    except (jwt.exceptions.DecodeError, jwt.exceptions.InvalidTokenError, jwt.exceptions.PyJWTError):
+        msg ='There was a problem logging you in'
+        return redirect(url_for('login', msg=msg))
+
+@app.route('/old', methods=['GET'])
+def old_home():
+    """Route cadangan (backup) ke template index.html lama selama proses migrasi."""
+    token_receive = request.cookies.get('mytoken')
+    try:
+        payload = jwt.decode(
+            token_receive,
+            SECRET_KEY,
+            algorithms=['HS256']
+        )
+        user_info = db.users.find_one({'username' : payload.get('id')})
         return render_template('index.html', user_info=user_info)
     except jwt.ExpiredSignatureError:
         msg ='your token has expired'
@@ -120,7 +139,26 @@ def user(username):
             {'username':username},
             {'_id' : False}
         )
-        return render_template('user.html',user_info=user_info, status=status)
+        return render_template('user_profile.html', user_info=user_info, status=status)
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return redirect(url_for('home'))
+
+@app.route('/user_old/<username>', methods=['GET'])
+def old_user(username):
+    """Route cadangan (backup) ke template user.html lama selama proses migrasi."""
+    token_receive = request.cookies.get('mytoken')
+    try:
+        payload = jwt.decode(
+            token_receive,
+            SECRET_KEY,
+            algorithms=['HS256']
+        )
+        status = username == payload.get('id')
+        user_info = db.users.find_one(
+            {'username':username},
+            {'_id' : False}
+        )
+        return render_template('user.html', user_info=user_info, status=status)
     except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))
     
@@ -299,7 +337,9 @@ def get_posts():
             SECRET_KEY,
             algorithms=['HS256']
         )
-        posts = list(db.posts.find({}).sort('date', -1).limit(20))
+        username_receive = request.args.get('username_give')
+        query = {'username': username_receive} if username_receive else {}
+        posts = list(db.posts.find(query).sort('date', -1).limit(20))
 
         # Batch count komentar untuk seluruh postingan yang diambil dalam satu query agregasi
         post_ids = [str(post['_id']) for post in posts]

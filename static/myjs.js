@@ -145,75 +145,150 @@ function get_posts(username) {
           let username_escaped = escapeHtml(post['username']);
           let comment_escaped = escapeHtml(post['comment']);
 
-          let html_temp = `
-          <div class="box" id="${post['_id']}">
-            <article class="media">
-              <div class="media-left">
-                <a class="image is-64x64" href="/user/${encodeURIComponent(post['username'])}">
-                  <img class="is-rounded" src="${avatar_url}" alt="${profile_name_escaped}"/>
-                </a>
-              </div>
-              <div class="media-content">
-                <div class="content">
-                  <p>
-                    <strong>${profile_name_escaped}</strong> <small>@${username_escaped}</small>
-                    <small>${time_before}</small>
-                    <br/>
-                    ${comment_escaped}
-                  </p>
-                </div>
-                <nav class="level is-mobile mb-2">
-                  <div class="level-left"> 
-                    <a class="level-item is-sparta" aria-label="heart" onclick="toggle_like('${post['_id']}', 'heart')">
-                      <span class="icon is-small">
-                        <i class="fa ${class_heart}" aria-hidden="true"></i>
-                      </span>&nbsp;<span class="like-num">${post['count_heart']}</span>
-                    </a>
-                    <a class="level-item is-sparta" aria-label="stars" onclick="toggle_stars('${post['_id']}', 'stars')">
-                      <span class="icon is-small">
-                        <i class="fa ${class_stars}" aria-hidden="true"></i>
-                      </span>&nbsp;<span class="star-num">${num2str(post['count_stars'])}</span>
-                    </a>
-                    <a class="level-item is-sparta" aria-label="thumbs" onclick="toggle_thumbs('${post['_id']}', 'thumbs')">
-                      <span class="icon is-small">
-                        <i class="fa ${class_thumbs}" aria-hidden="true"></i>
-                      </span>&nbsp;<span class="thumbs-num">${num2str(post['count_thumbs'])}</span>
-                    </a>
-                    <a class="level-item is-sparta btn-toggle-comment" aria-label="comment" onclick="toggle_comments('${post['_id']}')" title="Komentar">
-                      <span class="icon is-small">
-                        <i class="fa fa-comment-o" aria-hidden="true"></i>
-                      </span>&nbsp;<span class="comment-num" data-count="${count_comments}">${display_comment_num}</span>
-                    </a>
-                  </div>
-                </nav>
+          let isStitch = $('body').hasClass('bg-background');
+          let html_temp = '';
 
-                <!-- Container Komentar (Collapsible) -->
-                <div class="comment-section is-hidden" id="comments-section-${post['_id']}">
-                  <hr class="comment-divider"/>
-                  
-                  <!-- Form Input Komentar Utama -->
-                  <div class="comment-form mb-3">
-                    <div class="field has-addons">
-                      <div class="control is-expanded">
-                        <input class="input is-small is-rounded comment-input" id="input-comment-${post['_id']}" type="text" placeholder="Tulis komentar..." maxlength="2000" onkeydown="if(event.key==='Enter'){submit_comment('${post['_id']}');}" />
-                      </div>
-                      <div class="control">
-                        <button class="button is-small is-sparta is-rounded btn-submit-comment" onclick="submit_comment('${post['_id']}')">
-                          <span class="icon is-small"><i class="fa fa-paper-plane"></i></span>
-                          <span>Kirim</span>
-                        </button>
-                      </div>
+          if (isStitch) {
+            html_temp = `
+            <article class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm transition-all hover:shadow-md mb-space-md" id="${post['_id']}">
+              <!-- Post Header -->
+              <div class="flex items-center justify-between mb-space-sm">
+                <div class="flex items-center gap-space-sm min-w-0">
+                  <a href="/user/${encodeURIComponent(post['username'])}" class="shrink-0">
+                    <img class="w-10 h-10 rounded-full object-cover shrink-0" src="${avatar_url}" alt="${profile_name_escaped}" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+                  </a>
+                  <div class="flex flex-col min-w-0">
+                    <div class="flex items-center gap-space-xs">
+                      <a href="/user/${encodeURIComponent(post['username'])}" class="font-label-md text-label-md text-on-surface font-semibold truncate hover:underline no-underline text-inherit">${profile_name_escaped}</a>
+                    </div>
+                    <div class="flex items-center gap-space-xs text-on-surface-variant font-caption text-caption">
+                      <span>@${username_escaped}</span>
+                      <span>·</span>
+                      <span>${time_before}</span>
                     </div>
                   </div>
+                </div>
+              </div>
+              <!-- Post Body -->
+              <p class="font-body-md text-body-md text-on-surface mb-space-md leading-relaxed whitespace-pre-wrap">
+                ${comment_escaped}
+              </p>
+              <!-- Action Counter Toolbar -->
+              <div class="flex items-center justify-between text-on-surface-variant font-label-sm text-label-sm mb-space-md pt-space-xs">
+                <div class="flex items-center gap-space-md">
+                  <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${post['heart_by_me'] ? 'text-primary font-bold' : ''}" aria-label="heart" onclick="toggle_like('${post['_id']}', 'heart')">
+                    <span class="icon is-small">
+                      <i class="fa ${class_heart}" aria-hidden="true"></i>
+                    </span>&nbsp;<span class="like-num">${post['count_heart']}</span>
+                  </a>
+                  <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${post['stars_by_me'] ? 'text-primary font-bold' : ''}" aria-label="stars" onclick="toggle_stars('${post['_id']}', 'stars')">
+                    <span class="icon is-small">
+                      <i class="fa ${class_stars}" aria-hidden="true"></i>
+                    </span>&nbsp;<span class="star-num">${num2str(post['count_stars'])}</span>
+                  </a>
+                  <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${post['thumbs_by_me'] ? 'text-primary font-bold' : ''}" aria-label="thumbs" onclick="toggle_thumbs('${post['_id']}', 'thumbs')">
+                    <span class="icon is-small">
+                      <i class="fa ${class_thumbs}" aria-hidden="true"></i>
+                    </span>&nbsp;<span class="thumbs-num">${num2str(post['count_thumbs'])}</span>
+                  </a>
+                  <a class="flex items-center gap-1 text-primary-container font-semibold btn-toggle-comment cursor-pointer text-inherit no-underline" aria-label="comment" onclick="toggle_comments('${post['_id']}')" title="Komentar">
+                    <span class="icon is-small">
+                      <i class="fa fa-comment-o" aria-hidden="true"></i>
+                    </span>&nbsp;<span class="comment-num" data-count="${count_comments}">${display_comment_num}</span>
+                  </a>
+                </div>
+              </div>
 
-                  <!-- Container List Komentar (Tree) -->
-                  <div class="comment-list" id="comments-list-${post['_id']}"></div>
+              <!-- Container Komentar (Collapsible) -->
+              <div class="comment-section is-hidden bg-surface-container-low rounded-lg p-space-md mt-space-sm" id="comments-section-${post['_id']}">
+                <!-- Form Input Komentar Utama -->
+                <div class="comment-form mb-3">
+                  <div class="flex items-center gap-space-sm">
+                    <div class="flex-1 relative flex items-center">
+                      <input class="w-full bg-surface-container-lowest rounded-full py-space-xs pl-space-md pr-20 font-body-sm text-body-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary-container comment-input" id="input-comment-${post['_id']}" type="text" placeholder="Tulis komentar..." maxlength="2000" onkeydown="if(event.key==='Enter'){submit_comment('${post['_id']}');}" />
+                      <button class="absolute right-1 px-space-sm py-1 bg-primary-container text-on-primary font-label-sm text-label-sm rounded-full hover:bg-primary transition-colors btn-submit-comment border-0 cursor-pointer" onclick="submit_comment('${post['_id']}')">
+                        Reply
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
+                <!-- Container List Komentar (Tree) -->
+                <div class="comment-list" id="comments-list-${post['_id']}"></div>
               </div>
             </article>
-          </div>
-          `;
+            `;
+          } else {
+            html_temp = `
+            <div class="box" id="${post['_id']}">
+              <article class="media">
+                <div class="media-left">
+                  <a class="image is-64x64" href="/user/${encodeURIComponent(post['username'])}">
+                    <img class="is-rounded" src="${avatar_url}" alt="${profile_name_escaped}"/>
+                  </a>
+                </div>
+                <div class="media-content">
+                  <div class="content">
+                    <p>
+                      <strong>${profile_name_escaped}</strong> <small>@${username_escaped}</small>
+                      <small>${time_before}</small>
+                      <br/>
+                      ${comment_escaped}
+                    </p>
+                  </div>
+                  <nav class="level is-mobile mb-2">
+                    <div class="level-left"> 
+                      <a class="level-item is-sparta" aria-label="heart" onclick="toggle_like('${post['_id']}', 'heart')">
+                        <span class="icon is-small">
+                          <i class="fa ${class_heart}" aria-hidden="true"></i>
+                        </span>&nbsp;<span class="like-num">${post['count_heart']}</span>
+                      </a>
+                      <a class="level-item is-sparta" aria-label="stars" onclick="toggle_stars('${post['_id']}', 'stars')">
+                        <span class="icon is-small">
+                          <i class="fa ${class_stars}" aria-hidden="true"></i>
+                        </span>&nbsp;<span class="star-num">${num2str(post['count_stars'])}</span>
+                      </a>
+                      <a class="level-item is-sparta" aria-label="thumbs" onclick="toggle_thumbs('${post['_id']}', 'thumbs')">
+                        <span class="icon is-small">
+                          <i class="fa ${class_thumbs}" aria-hidden="true"></i>
+                        </span>&nbsp;<span class="thumbs-num">${num2str(post['count_thumbs'])}</span>
+                      </a>
+                      <a class="level-item is-sparta btn-toggle-comment" aria-label="comment" onclick="toggle_comments('${post['_id']}')" title="Komentar">
+                        <span class="icon is-small">
+                          <i class="fa fa-comment-o" aria-hidden="true"></i>
+                        </span>&nbsp;<span class="comment-num" data-count="${count_comments}">${display_comment_num}</span>
+                      </a>
+                    </div>
+                  </nav>
+
+                  <!-- Container Komentar (Collapsible) -->
+                  <div class="comment-section is-hidden" id="comments-section-${post['_id']}">
+                    <hr class="comment-divider"/>
+                    
+                    <!-- Form Input Komentar Utama -->
+                    <div class="comment-form mb-3">
+                      <div class="field has-addons">
+                        <div class="control is-expanded">
+                          <input class="input is-small is-rounded comment-input" id="input-comment-${post['_id']}" type="text" placeholder="Tulis komentar..." maxlength="2000" onkeydown="if(event.key==='Enter'){submit_comment('${post['_id']}');}" />
+                        </div>
+                        <div class="control">
+                          <button class="button is-small is-sparta is-rounded btn-submit-comment" onclick="submit_comment('${post['_id']}')">
+                            <span class="icon is-small"><i class="fa fa-paper-plane"></i></span>
+                            <span>Kirim</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Container List Komentar (Tree) -->
+                    <div class="comment-list" id="comments-list-${post['_id']}"></div>
+                  </div>
+
+                </div>
+              </article>
+            </div>
+            `;
+          }
           $('#post-box').append(html_temp);
         }
       }
@@ -241,6 +316,7 @@ function toggle_like(post_id, type) {
       },
       success: function (response) {
         $i_like.addClass('fa-heart-o').removeClass('fa-heart');
+        $a_like.removeClass('text-primary font-bold');
         $a_like.find('span.like-num').text(num2str(response['count']));
       },
       error: function (xhr) {
@@ -258,6 +334,7 @@ function toggle_like(post_id, type) {
       },
       success: function (response) {
         $i_like.addClass('fa-heart').removeClass('fa-heart-o');
+        $a_like.addClass('text-primary font-bold');
         $a_like.find('span.like-num').text(num2str(response['count']));
       },
       error: function (xhr) {
@@ -282,6 +359,7 @@ function toggle_stars(post_id, type) {
       },
       success: function (response) {
         $i_stars.addClass('fa-star-o').removeClass('fa-star');
+        $a_stars.removeClass('text-primary font-bold');
         $a_stars.find('span.star-num').text(num2str(response['count_stars']));
       },
       error: function (xhr) {
@@ -299,6 +377,7 @@ function toggle_stars(post_id, type) {
       },
       success: function (response) {
         $i_stars.addClass('fa-star').removeClass('fa-star-o');
+        $a_stars.addClass('text-primary font-bold');
         $a_stars.find('span.star-num').text(num2str(response['count_stars']));
       },
       error: function (xhr) {
@@ -323,6 +402,7 @@ function toggle_thumbs(post_id, type) {
       },
       success: function (response) {
         $i_thumbs.addClass('fa-thumbs-o-up').removeClass('fa-thumbs-up');
+        $a_thumbs.removeClass('text-primary font-bold');
         $a_thumbs.find('span.thumbs-num').text(num2str(response['count_thumbs']));
       },
       error: function (xhr) {
@@ -340,6 +420,7 @@ function toggle_thumbs(post_id, type) {
       },
       success: function (response) {
         $i_thumbs.addClass('fa-thumbs-up').removeClass('fa-thumbs-o-up');
+        $a_thumbs.addClass('text-primary font-bold');
         $a_thumbs.find('span.thumbs-num').text(num2str(response['count_thumbs']));
       },
       error: function (xhr) {
@@ -483,30 +564,71 @@ function render_comment_nodes(nodes, post_id, depth) {
       children_html = `<div class="comment-children">${render_comment_nodes(node.children, post_id, depth + 1)}</div>`;
     }
 
-    html += `
-    <article class="media comment-item ${depth_class}" id="comment-${node._id}">
-      <figure class="media-left">
-        <a class="image is-24x24" href="/user/${encodeURIComponent(node.username)}">
-          <img class="is-rounded comment-avatar" src="${avatar_src}" alt="${escapeHtml(node.profile_name)}">
+    let isStitch = $('body').hasClass('bg-background');
+
+    if (isStitch) {
+      let stitch_actions = '';
+      if (!is_deleted) {
+        stitch_actions += `
+          <button class="hover:text-primary transition-colors font-medium cursor-pointer border-0 bg-transparent p-0 text-inherit flex items-center gap-1 btn-action-reply text-[12px]" data-username="${escapeHtml(node.username)}" onclick="open_reply_form(this, '${post_id}', '${node._id}')">
+            <i class="fa fa-reply text-[10px]"></i><span>Reply</span>
+          </button>
+        `;
+        if (is_mine) {
+          stitch_actions += `
+            <button class="text-error hover:underline transition-colors font-medium cursor-pointer border-0 bg-transparent p-0 flex items-center gap-1 btn-action-delete text-[12px] ml-3" onclick="delete_comment('${post_id}', '${node._id}')">
+              <i class="fa fa-trash text-[10px]"></i><span>Delete</span>
+            </button>
+          `;
+        }
+      }
+
+      html += `
+      <div class="flex items-start gap-space-sm comment-item ${depth_class} pt-2 mt-2" id="comment-${node._id}">
+        <a href="/user/${encodeURIComponent(node.username)}" class="shrink-0">
+          <img class="w-8 h-8 rounded-full object-cover shrink-0 comment-avatar" src="${avatar_src}" alt="${escapeHtml(node.profile_name)}" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
         </a>
-      </figure>
-      <div class="media-content">
-        <div class="content comment-content-box mb-1">
-          <p class="mb-1">
-            <strong class="is-size-7">${escapeHtml(node.profile_name)}</strong>
-            <small class="is-size-7 has-text-grey">@${escapeHtml(node.username)}</small>
-            <small class="is-size-7 has-text-grey-light ml-1">${time_str}</small>
-            <br/>
-            ${reply_context_html}
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-space-xs flex-wrap">
+            <a href="/user/${encodeURIComponent(node.username)}" class="font-label-sm text-label-sm font-semibold text-on-surface hover:underline no-underline text-inherit">${escapeHtml(node.profile_name)}</a>
+            <span class="font-caption text-caption text-on-surface-variant">@${escapeHtml(node.username)} · ${time_str}</span>
+          </div>
+          ${reply_context_html ? `<div class="font-caption text-caption text-on-surface-variant mt-0.5">${reply_context_html}</div>` : ''}
+          <div class="font-body-sm text-body-sm text-on-surface mt-0.5 leading-relaxed comment-content-box">
             ${content_html}
-          </p>
+          </div>
+          ${stitch_actions ? `<div class="flex items-center gap-space-md mt-1 text-on-surface-variant font-label-sm text-label-sm comment-actions">${stitch_actions}</div>` : ''}
+          <div class="reply-form-container" id="reply-form-${node._id}"></div>
+          ${children_html}
         </div>
-        ${actions_html ? `<nav class="level is-mobile comment-actions mb-1"><div class="level-left">${actions_html}</div></nav>` : ''}
-        <div class="reply-form-container" id="reply-form-${node._id}"></div>
-        ${children_html}
       </div>
-    </article>
-    `;
+      `;
+    } else {
+      html += `
+      <article class="media comment-item ${depth_class}" id="comment-${node._id}">
+        <figure class="media-left">
+          <a class="image is-24x24" href="/user/${encodeURIComponent(node.username)}">
+            <img class="is-rounded comment-avatar" src="${avatar_src}" alt="${escapeHtml(node.profile_name)}">
+          </a>
+        </figure>
+        <div class="media-content">
+          <div class="content comment-content-box mb-1">
+            <p class="mb-1">
+              <strong class="is-size-7">${escapeHtml(node.profile_name)}</strong>
+              <small class="is-size-7 has-text-grey">@${escapeHtml(node.username)}</small>
+              <small class="is-size-7 has-text-grey-light ml-1">${time_str}</small>
+              <br/>
+              ${reply_context_html}
+              ${content_html}
+            </p>
+          </div>
+          ${actions_html ? `<nav class="level is-mobile comment-actions mb-1"><div class="level-left">${actions_html}</div></nav>` : ''}
+          <div class="reply-form-container" id="reply-form-${node._id}"></div>
+          ${children_html}
+        </div>
+      </article>
+      `;
+    }
   });
   return html;
 }
@@ -524,30 +646,53 @@ function open_reply_form(buttonElement, post_id, comment_id) {
 
   let targetUsername = $(buttonElement).data('username') || '';
 
-  let form_html = `
-  <div class="box is-shadowless p-2 my-2 reply-box">
-    <div class="is-flex is-justify-content-space-between is-align-items-center mb-1">
-      <small class="has-text-grey is-size-7">Membalas <strong class="is-sparta">@${escapeHtml(targetUsername)}</strong></small>
-      <button class="delete is-small" onclick="close_reply_form('${comment_id}')" title="Batal"></button>
-    </div>
-    <div class="field mb-2">
-      <div class="control">
-        <input class="input is-small is-rounded reply-input" id="input-reply-${comment_id}" type="text" placeholder="Tulis balasan Anda..." maxlength="2000" onkeydown="if(event.key==='Enter'){submit_reply('${post_id}', '${comment_id}');}" />
+  let isStitch = $('body').hasClass('bg-background');
+  let form_html = '';
+
+  if (isStitch) {
+    form_html = `
+    <div class="p-3 my-2 bg-surface-container-lowest rounded-lg border border-outline-variant/40 reply-box shadow-sm">
+      <div class="flex justify-between items-center mb-1">
+        <span class="text-on-surface-variant font-caption text-caption">Membalas <strong class="text-primary font-semibold">@${escapeHtml(targetUsername)}</strong></span>
+        <button class="text-on-surface-variant hover:text-on-surface text-caption font-bold border-0 bg-transparent cursor-pointer p-0" onclick="close_reply_form('${comment_id}')" title="Batal">✕</button>
       </div>
-    </div>
-    <div class="field is-grouped is-grouped-right mb-0">
-      <div class="control">
-        <button class="button is-small is-light is-rounded" onclick="close_reply_form('${comment_id}')">Batal</button>
+      <div class="mb-2">
+        <input class="w-full bg-surface-container-low rounded-lg p-2 font-body-sm text-body-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary-container reply-input" id="input-reply-${comment_id}" type="text" placeholder="Tulis balasan Anda..." maxlength="2000" onkeydown="if(event.key==='Enter'){submit_reply('${post_id}', '${comment_id}');}" />
       </div>
-      <div class="control">
-        <button class="button is-small is-sparta is-rounded btn-submit-reply" onclick="submit_reply('${post_id}', '${comment_id}')">
-          <span class="icon is-small"><i class="fa fa-paper-plane"></i></span>
-          <span>Kirim</span>
+      <div class="flex justify-end gap-2">
+        <button class="px-3 py-1 rounded-full bg-surface-container text-on-surface font-label-sm text-label-sm hover:bg-surface-container-high transition-all border-0 cursor-pointer" onclick="close_reply_form('${comment_id}')">Batal</button>
+        <button class="px-3 py-1 rounded-full bg-primary-container text-on-primary font-label-sm text-label-sm hover:bg-primary shadow-sm transition-all btn-submit-reply border-0 cursor-pointer flex items-center gap-1" onclick="submit_reply('${post_id}', '${comment_id}')">
+          <i class="fa fa-paper-plane text-[10px]"></i><span>Kirim</span>
         </button>
       </div>
     </div>
-  </div>
-  `;
+    `;
+  } else {
+    form_html = `
+    <div class="box is-shadowless p-2 my-2 reply-box">
+      <div class="is-flex is-justify-content-space-between is-align-items-center mb-1">
+        <small class="has-text-grey is-size-7">Membalas <strong class="is-sparta">@${escapeHtml(targetUsername)}</strong></small>
+        <button class="delete is-small" onclick="close_reply_form('${comment_id}')" title="Batal"></button>
+      </div>
+      <div class="field mb-2">
+        <div class="control">
+          <input class="input is-small is-rounded reply-input" id="input-reply-${comment_id}" type="text" placeholder="Tulis balasan Anda..." maxlength="2000" onkeydown="if(event.key==='Enter'){submit_reply('${post_id}', '${comment_id}');}" />
+        </div>
+      </div>
+      <div class="field is-grouped is-grouped-right mb-0">
+        <div class="control">
+          <button class="button is-small is-light is-rounded" onclick="close_reply_form('${comment_id}')">Batal</button>
+        </div>
+        <div class="control">
+          <button class="button is-small is-sparta is-rounded btn-submit-reply" onclick="submit_reply('${post_id}', '${comment_id}')">
+            <span class="icon is-small"><i class="fa fa-paper-plane"></i></span>
+            <span>Kirim</span>
+          </button>
+        </div>
+      </div>
+    </div>
+    `;
+  }
 
   $container.html(form_html);
   $(`#input-reply-${comment_id}`).focus();

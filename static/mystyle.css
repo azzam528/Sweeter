@@ -1,8 +1,9 @@
-* {
+body:not(.bg-background),
+body:not(.bg-background) * {
     font-family: 'Noto Serif Display', serif;
 }
 
-body {
+body:not(.bg-background) {
     background-color: #d4adad;
     min-height: 100vh;
 }
@@ -65,6 +66,10 @@ input::-webkit-calendar-indicator {
 /* ========================================================
    COMMENT & REPLY SYSTEM STYLES
    ======================================================== */
+
+.is-hidden {
+    display: none !important;
+}
 
 .comment-divider {
     margin: 0.65rem 0;
