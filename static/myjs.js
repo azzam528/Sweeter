@@ -127,6 +127,27 @@ function get_posts(username) {
     success: function (response) {
       if (response['result'] === 'success') {
         let posts = response['posts'];
+        let isStitch = $('body').hasClass('bg-background');
+
+        if (!posts || posts.length === 0) {
+          if (isStitch) {
+            $('#post-box').html(`
+              <div class="text-center text-on-surface-variant py-12 bg-surface-container-lowest rounded-xl p-6 shadow-sm">
+                <span class="material-symbols-outlined text-[36px] text-outline block mb-2 mx-auto">article</span>
+                <p class="font-body-md text-body-md text-on-surface font-semibold mb-1">Belum ada postingan</p>
+                <p class="font-caption text-caption text-on-surface-variant">Pengguna ini belum membagikan kiriman apapun.</p>
+              </div>
+            `);
+          } else {
+            $('#post-box').html(`
+              <div class="has-text-centered has-text-grey py-6">
+                <p>Belum ada postingan.</p>
+              </div>
+            `);
+          }
+          return;
+        }
+
         for (let i = 0; i < posts.length; i++) {
           let post = posts[i];
           let time_post = new Date(post['date']);

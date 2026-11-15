@@ -111,11 +111,13 @@
     <!-- Right: User info + Sign Out -->
     <div class="flex items-center gap-space-md">
       <div class="flex items-center gap-space-sm">
-        <span class="font-label-md text-label-md text-on-surface hidden sm:inline-block">{{ user_info.profile_name | e }}</span>
-        <img alt="Profile"
-             class="w-8 h-8 rounded-full object-cover"
-             src="/static/{{ user_info.profile_pic_real | e }}"
-             onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+        <span class="font-label-md text-label-md text-on-surface hidden sm:inline-block">{{ (current_user.profile_name if current_user else user_info.profile_name) | e }}</span>
+        <a href="/user/{{ (current_user.username if current_user else user_info.username) | e }}">
+          <img alt="Profile"
+               class="w-8 h-8 rounded-full object-cover cursor-pointer"
+               src="/static/{{ (current_user.profile_pic_real if current_user else user_info.profile_pic_real) | e }}"
+               onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+        </a>
       </div>
       <form action="/sign_out" method="post" class="inline m-0">
         <button type="submit"
@@ -137,7 +139,7 @@
           <span class="material-symbols-outlined text-[22px]">home</span>
           <span class="font-label-md text-label-md">Home</span>
         </a>
-        <a aria-current="page" class="flex items-center gap-space-md px-space-md py-space-sm rounded-full transition-all bg-secondary-container text-on-secondary-container font-semibold no-underline" href="/user/{{ user_info.username | e }}">
+        <a aria-current="page" class="flex items-center gap-space-md px-space-md py-space-sm rounded-full transition-all {% if status %}bg-secondary-container text-on-secondary-container font-semibold{% else %}text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface{% endif %} no-underline" href="/user/{{ (current_user.username if current_user else user_info.username) | e }}">
           <span class="material-symbols-outlined text-[22px]">person</span>
           <span class="font-label-md text-label-md">Profile</span>
         </a>
@@ -149,19 +151,20 @@
       </a>
     </div>
     <!-- Bottom user identity card -->
-    <div class="flex items-center justify-between p-space-sm rounded-xl bg-surface-container-low hover:bg-surface-container transition-colors cursor-pointer">
+    <a href="/user/{{ (current_user.username if current_user else user_info.username) | e }}"
+       class="flex items-center justify-between p-space-sm rounded-xl bg-surface-container-low hover:bg-surface-container transition-colors cursor-pointer no-underline">
       <div class="flex items-center gap-space-sm min-w-0">
         <img alt="Profile"
              class="w-10 h-10 rounded-full object-cover flex-shrink-0"
-             src="/static/{{ user_info.profile_pic_real | e }}"
+             src="/static/{{ (current_user.profile_pic_real if current_user else user_info.profile_pic_real) | e }}"
              onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
         <div class="flex flex-col min-w-0">
-          <span class="font-label-md text-label-md text-on-surface truncate">{{ user_info.profile_name | e }}</span>
-          <span class="font-caption text-caption text-on-surface-variant truncate">@{{ user_info.username | e }}</span>
+          <span class="font-label-md text-label-md text-on-surface truncate">{{ (current_user.profile_name if current_user else user_info.profile_name) | e }}</span>
+          <span class="font-caption text-caption text-on-surface-variant truncate">@{{ (current_user.username if current_user else user_info.username) | e }}</span>
         </div>
       </div>
       <span class="material-symbols-outlined text-on-surface-variant text-[20px]">more_horiz</span>
-    </div>
+    </a>
   </aside>
 
   <!-- ===== MAIN CONTENT COLUMN ===== -->
@@ -171,7 +174,7 @@
 
         <!-- ===== PROFILE HEADER ===== -->
         <div class="relative w-full rounded-2xl overflow-hidden bg-surface-container-high shadow-sm">
-          <!-- Cover banner — using primary-container color as placeholder; TODO: user cover image -->
+          <!-- Cover banner — warm terracotta gradient background; TODO: custom user cover image -->
           <div class="w-full h-44 sm:h-52 bg-cover bg-center relative"
                style="background-color: #583030;">
             <div class="absolute inset-0 bg-gradient-to-t from-primary/60 via-transparent to-transparent"></div>
@@ -192,16 +195,20 @@
               </div>
               <!-- Profile Actions -->
               <div class="flex items-center gap-space-sm pt-2">
+                <button class="p-2 sm:px-3 sm:py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface transition-all duration-150 flex items-center gap-1.5 font-label-sm text-label-sm border-0 cursor-pointer" id="share-profile-btn" title="Share Profile">
+                  <span class="material-symbols-outlined text-[18px]">ios_share</span>
+                  <span class="hidden sm:inline">Share</span>
+                </button>
                 {% if status %}
                 <!-- Own profile: show Edit Profile button -->
                 <button id="edit-profile-btn"
-                        class="px-4 py-1.5 rounded-full bg-surface-container-low hover:bg-surface-container-high text-on-surface font-label-md text-label-md transition-all duration-150 shadow-sm">
+                        class="px-4 py-1.5 rounded-full bg-surface-container-low hover:bg-surface-container-high text-on-surface font-label-md text-label-md transition-all duration-150 shadow-sm border-0 cursor-pointer">
                   Edit Profile
                 </button>
                 {% else %}
-                <!-- Other user's profile: TODO: Follow button not yet implemented -->
-                <button class="px-4 py-1.5 rounded-full bg-primary-container text-on-primary font-label-md text-label-md transition-all duration-150 shadow-sm hover:bg-primary">
-                  Follow
+                <!-- Other user's profile: Follow feature not yet supported by database schema (TODO) -->
+                <button class="px-4 py-1.5 rounded-full bg-surface-container text-on-surface-variant font-label-md text-label-md shadow-sm opacity-60 cursor-not-allowed border-0" title="Follow feature coming soon (TODO)" disabled>
+                  Follow (Coming Soon)
                 </button>
                 {% endif %}
               </div>
@@ -217,8 +224,20 @@
 
             <!-- Bio -->
             <p class="font-body-md text-body-md text-on-surface mt-3 leading-relaxed max-w-xl" id="display-profile-info">
-              {{ user_info.profile_info | e if user_info.profile_info else '' }}
+              {{ user_info.profile_info | e if user_info.profile_info else 'No bio provided yet.' }}
             </p>
+
+            <!-- Stats (Real Data from MongoDB) -->
+            <div class="flex items-center gap-6 mt-4 pt-3 border-t border-surface-container text-on-surface flex-wrap">
+              <div class="flex items-baseline gap-1.5">
+                <span class="font-headline-sm text-headline-sm font-bold text-on-surface">{{ post_count }}</span>
+                <span class="font-body-sm text-body-sm text-secondary">Posts</span>
+              </div>
+              <!-- Note: Followers & Following not yet in DB schema -->
+              <div class="flex items-baseline gap-1.5 text-on-surface-variant text-body-sm">
+                <span class="font-caption text-caption text-secondary">Followers &amp; Following (Coming Soon)</span>
+              </div>
+            </div>
 
           </div>
         </div><!-- /.profile header -->
@@ -258,13 +277,21 @@
         </div>
         {% endif %}
 
-        <!-- ===== PROFILE TABS (placeholder; only Posts tab is active) ===== -->
+        <!-- ===== PROFILE NAVIGATION TABS ===== -->
         <div class="relative bg-surface-container-lowest rounded-xl p-1.5 mt-4 mb-4 shadow-sm">
           <nav class="flex items-center justify-between text-center" id="profile-tabs">
-            <button class="tab-btn flex-1 py-2 rounded-lg font-label-md text-label-md transition-all duration-200 bg-secondary-container text-on-secondary-container font-semibold shadow-sm" data-tab="posts">
-              Posts
+            <button class="tab-btn flex-1 py-2 rounded-lg font-label-md text-label-md transition-all duration-200 bg-secondary-container text-on-secondary-container font-semibold shadow-sm border-0 cursor-pointer" data-tab="posts">
+              Posts ({{ post_count }})
             </button>
-            <!-- TODO: Replies, Highlights, Media, Likes tabs not yet implemented -->
+            <button class="tab-btn flex-1 py-2 rounded-lg font-label-md text-label-md transition-all duration-200 text-secondary hover:text-on-surface hover:bg-surface-container-low border-0 cursor-not-allowed opacity-60" data-tab="replies" title="Coming Soon (TODO)" disabled>
+              Replies
+            </button>
+            <button class="tab-btn flex-1 py-2 rounded-lg font-label-md text-label-md transition-all duration-200 text-secondary hover:text-on-surface hover:bg-surface-container-low border-0 cursor-not-allowed opacity-60" data-tab="media" title="Coming Soon (TODO)" disabled>
+              Media
+            </button>
+            <button class="tab-btn flex-1 py-2 rounded-lg font-label-md text-label-md transition-all duration-200 text-secondary hover:text-on-surface hover:bg-surface-container-low border-0 cursor-not-allowed opacity-60" data-tab="likes" title="Coming Soon (TODO)" disabled>
+              Likes
+            </button>
           </nav>
         </div>
 
@@ -330,6 +357,23 @@
 
     // Load this user's posts (filtered by username)
     get_posts('{{ user_info.username | e }}');
+
+    // Share profile button
+    $('#share-profile-btn').on('click', function () {
+      var shareUrl = window.location.href;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(shareUrl).then(function () {
+          var $btn = $('#share-profile-btn');
+          var originalHtml = $btn.html();
+          $btn.html('<span class="material-symbols-outlined text-[18px]">check</span><span class="hidden sm:inline">Copied!</span>');
+          setTimeout(function () {
+            $btn.html(originalHtml);
+          }, 2000);
+        });
+      } else {
+        prompt('Copy profile link:', shareUrl);
+      }
+    });
 
     {% if status %}
     // ---- Edit Profile (own profile only) ----

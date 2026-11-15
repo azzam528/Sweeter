@@ -134,12 +134,27 @@ def user(username):
             SECRET_KEY,
             algorithms=['HS256']
         )
-        status = username == payload.get('id')
-        user_info = db.users.find_one(
-            {'username':username},
-            {'_id' : False}
+        current_username = payload.get('id')
+        current_user = db.users.find_one(
+            {'username': current_username},
+            {'_id': False}
         )
-        return render_template('user_profile.html', user_info=user_info, status=status)
+        user_info = db.users.find_one(
+            {'username': username},
+            {'_id': False}
+        )
+        if not user_info:
+            return render_template('404.html', username=username, current_user=current_user), 404
+
+        status = (username == current_username)
+        post_count = db.posts.count_documents({'username': username})
+        return render_template(
+            'user_profile.html',
+            user_info=user_info,
+            current_user=current_user,
+            status=status,
+            post_count=post_count
+        )
     except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))
 
@@ -153,11 +168,14 @@ def old_user(username):
             SECRET_KEY,
             algorithms=['HS256']
         )
-        status = username == payload.get('id')
         user_info = db.users.find_one(
-            {'username':username},
-            {'_id' : False}
+            {'username': username},
+            {'_id': False}
         )
+        if not user_info:
+            return render_template('404.html', username=username), 404
+
+        status = (username == payload.get('id'))
         return render_template('user.html', user_info=user_info, status=status)
     except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))
@@ -337,7 +355,7 @@ def get_posts():
             SECRET_KEY,
             algorithms=['HS256']
         )
-        username_receive = request.args.get('username_give')
+        username_receive = request.args.get('username_give', '').strip()
         query = {'username': username_receive} if username_receive else {}
         posts = list(db.posts.find(query).sort('date', -1).limit(20))
 
