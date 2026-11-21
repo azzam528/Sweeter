@@ -21,6 +21,14 @@ from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
 from database import db, check_connection
+from notifications import (
+    create_notification,
+    get_unread_count,
+    get_user_notifications,
+    mark_notification_as_read,
+    mark_all_notifications_as_read,
+    cleanup_notifications_for_post,
+)
 
 load_dotenv()
 
@@ -577,6 +585,19 @@ def update_like():
             db.thumbs.insert_one(doc)
         else:
             db.thumbs.delete_one(doc) 
+
+        # Notifikasi reaksi (like/stars/thumbs)
+        if action_receive in ['like', 'stars', 'thumbs']:
+            if post_id_receive and ObjectId.is_valid(post_id_receive):
+                target_post = db.posts.find_one({'_id': ObjectId(post_id_receive)})
+                if target_post and target_post.get('username') != user_info.get('username'):
+                    create_notification(
+                        recipient=target_post.get('username'),
+                        actor=user_info.get('username'),
+                        notif_type='reaction',
+                        post_id=post_id_receive,
+                        action_type=type_receive
+                    ) 
         
         count = db.likes.count_documents({
             'post_id' : post_id_receive,
@@ -707,6 +728,38 @@ def create_comment():
     result = db.comments.insert_one(doc)
     doc['_id'] = str(result.inserted_id)
     doc['is_mine'] = True
+
+    # Notifikasi untuk komentar dan balasan
+    new_comment_id = doc['_id']
+    post_author = target_post.get('username')
+
+    if parent_comment_id:
+        parent_author = parent_comment.get('username')
+        if parent_author and parent_author != username:
+            create_notification(
+                recipient=parent_author,
+                actor=username,
+                notif_type='reply',
+                post_id=str(post_id_receive),
+                comment_id=new_comment_id
+            )
+        if post_author and post_author != username and post_author != parent_author:
+            create_notification(
+                recipient=post_author,
+                actor=username,
+                notif_type='comment',
+                post_id=str(post_id_receive),
+                comment_id=new_comment_id
+            )
+    else:
+        if post_author and post_author != username:
+            create_notification(
+                recipient=post_author,
+                actor=username,
+                notif_type='comment',
+                post_id=str(post_id_receive),
+                comment_id=new_comment_id
+            )
 
     return jsonify({
         'result': 'success',
@@ -946,6 +999,13 @@ def follow_user(target_username=None):
 
     follower_count = db.follows.count_documents({'following': target})
     following_count = db.follows.count_documents({'follower': current_username})
+
+    # Notifikasi follow
+    create_notification(
+        recipient=target,
+        actor=current_username,
+        notif_type='follow'
+    )
 
     return jsonify({
         'result': 'success',
@@ -1430,6 +1490,133 @@ def bookmarks_page():
         return redirect(url_for('login'))
 
 
+# ==========================================
+# NOTIFICATION SYSTEM (SWEETER V2)
+# ==========================================
+
+@app.route('/api/notifications', methods=['GET'])
+def get_notifications_api():
+    """
+    Mengambil daftar notifikasi milik pengguna saat ini dengan pagination keyset cursor.
+    Diperkaya dengan profil actor dan snippet target.
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    cursor = request.args.get('cursor', '').strip()
+    limit = request.args.get('limit', '20').strip()
+
+    data = get_user_notifications(current_username, cursor=cursor, limit=limit)
+    return jsonify({
+        'result': 'success',
+        'notifications': data['notifications'],
+        'next_cursor': data['next_cursor'],
+        'has_more': data['has_more'],
+        'unread_count': data['unread_count']
+    }), 200
+
+
+@app.route('/api/notifications/unread_count', methods=['GET'])
+def get_notifications_unread_count_api():
+    """Mengambil jumlah notifikasi belum dibaca untuk pengguna aktif."""
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    count = get_unread_count(current_username)
+    return jsonify({
+        'result': 'success',
+        'unread_count': count
+    }), 200
+
+
+@app.route('/api/notifications/<notification_id>/read', methods=['POST'])
+def mark_notification_read_api(notification_id):
+    """
+    Menandai satu notifikasi sebagai telah dibaca.
+    Memeriksa otentikasi, validitas ID, dan otorisasi kepemilikan (403 jika bukan pemilik).
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    res = mark_notification_as_read(notification_id, current_username)
+    if res['code'] != 200:
+        return jsonify({'result': 'fail', 'msg': res['msg']}), res['code']
+
+    return jsonify({
+        'result': 'success',
+        'msg': res['msg'],
+        'unread_count': res['unread_count']
+    }), 200
+
+
+@app.route('/api/notifications/read_all', methods=['POST'])
+def mark_all_notifications_read_api():
+    """Menandai seluruh notifikasi milik pengguna aktif sebagai telah dibaca."""
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    res = mark_all_notifications_as_read(current_username)
+    return jsonify({
+        'result': 'success',
+        'msg': res['msg'],
+        'modified_count': res['modified_count'],
+        'unread_count': 0
+    }), 200
+
+
+@app.route('/notifications', methods=['GET'])
+def notifications_page():
+    """Halaman web Notification Center."""
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return redirect(url_for('login'))
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+        user_info = db.users.find_one({'username': current_username}, {'_id': False})
+        if not user_info:
+            return redirect(url_for('login'))
+
+        unread_count = get_unread_count(current_username)
+        return render_template(
+            'notifications.html',
+            user_info=user_info,
+            current_user=user_info,
+            unread_count=unread_count
+        )
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return redirect(url_for('login'))
+
+
 @app.route('/api/posts/<post_id>/edit', methods=['POST'])
 @app.route('/edit_post', methods=['POST'])
 def edit_post(post_id=None):
@@ -1536,6 +1723,7 @@ def delete_post_endpoint(post_id=None):
     db.stars.delete_many({'post_id': target_pid})
     db.thumbs.delete_many({'post_id': target_pid})
     db.comments.delete_many({'post_id': target_pid})
+    cleanup_notifications_for_post(target_pid)
 
     return jsonify({
         'result': 'success',

@@ -142,6 +142,11 @@ function switch_feed_tab(targetTab) {
 }
 
 function load_more_posts() {
+  if (window.isNotificationsPage) {
+    if (window.notifsLoading || !window.notifsHasMore || !window.notifsNextCursor) return;
+    load_notifications(window.notifsNextCursor, true);
+    return;
+  }
   if (window.isBookmarksPage) {
     if (window.bookmarksLoading || !window.bookmarksHasMore || !window.bookmarksNextCursor) return;
     load_bookmarks(window.bookmarksNextCursor, true);
@@ -1324,3 +1329,344 @@ function delete_post(post_id) {
     }
   });
 }
+
+// ==========================================
+// NOTIFICATION SYSTEM (SWEETER V2)
+// ==========================================
+
+function update_notification_badges(count) {
+  let num = parseInt(count || '0', 10);
+  let display = num > 99 ? '99+' : num.toString();
+
+  let $navBadge = $('#nav-unread-badge');
+  let $headerBadge = $('#header-unread-badge');
+  let $pageBadge = $('#page-unread-count');
+
+  if (num > 0) {
+    if ($navBadge.length) {
+      $navBadge.text(display).removeClass('hidden');
+    }
+    if ($headerBadge.length) {
+      $headerBadge.text(display).removeClass('hidden');
+    }
+    if ($pageBadge.length) {
+      $pageBadge.text(num).removeClass('hidden');
+    }
+  } else {
+    if ($navBadge.length) {
+      $navBadge.addClass('hidden');
+    }
+    if ($headerBadge.length) {
+      $headerBadge.addClass('hidden');
+    }
+    if ($pageBadge.length) {
+      $pageBadge.text('0');
+    }
+  }
+}
+
+function fetch_unread_notification_count() {
+  $.ajax({
+    type: 'GET',
+    url: '/api/notifications/unread_count',
+    success: function (res) {
+      if (res.result === 'success') {
+        update_notification_badges(res.unread_count);
+      }
+    }
+  });
+}
+
+function render_empty_notifications() {
+  $('#notifications-box').html(`
+    <div class="text-center py-16 px-6 bg-surface-container-lowest rounded-xl shadow-sm my-2" id="notifications-empty-state">
+      <span class="material-symbols-outlined text-[48px] text-outline-variant mb-2 block mx-auto">notifications_off</span>
+      <h3 class="font-headline-sm text-[18px] font-bold text-on-surface mb-1">Belum ada notifikasi</h3>
+      <p class="font-body-sm text-secondary max-w-sm mx-auto mb-4 leading-relaxed">
+        Saat seseorang mengikuti Anda, bereaksi, atau mengomentari kiriman Anda, pemberitahuan akan muncul di sini.
+      </p>
+      <a href="/" class="inline-block px-5 py-2 rounded-full bg-primary-container text-on-primary font-label-md text-label-md hover:bg-primary transition-all border-0 cursor-pointer shadow-sm no-underline">
+        Kembali ke Timeline
+      </a>
+    </div>
+  `);
+}
+
+function render_notification_item(notif) {
+  let actor = notif.actor_info || {};
+  let actorName = escapeHtml(actor.profile_name || notif.actor);
+  let actorUsername = escapeHtml(notif.actor);
+  let avatarUrl = sanitizeAvatarUrl(actor.profile_pic_real || 'profile_pics/profile_placeholder.png');
+  let timeStr = time2str(new Date(notif.created_at));
+  let isRead = Boolean(notif.is_read);
+
+  // Icon & styling per tipe notifikasi
+  let typeIcon = 'notifications';
+  let typeBg = 'bg-primary-container text-on-primary';
+  let targetUrl = '/';
+
+  if (notif.type === 'follow') {
+    typeIcon = 'person_add';
+    typeBg = 'bg-primary-container text-on-primary';
+    targetUrl = `/user/${encodeURIComponent(notif.actor)}`;
+  } else if (notif.type === 'reaction') {
+    if (notif.action_type === 'stars') {
+      typeIcon = 'star';
+      typeBg = 'bg-[#e69138] text-white';
+    } else if (notif.action_type === 'thumbs') {
+      typeIcon = 'thumb_up';
+      typeBg = 'bg-[#3d85c6] text-white';
+    } else {
+      typeIcon = 'favorite';
+      typeBg = 'bg-error text-white';
+    }
+    targetUrl = notif.post_exists && notif.post_id ? `/#${encodeURIComponent(notif.post_id)}` : 'javascript:void(0)';
+  } else if (notif.type === 'comment') {
+    typeIcon = 'chat_bubble';
+    typeBg = 'bg-secondary text-white';
+    targetUrl = notif.post_exists && notif.post_id ? `/#${encodeURIComponent(notif.post_id)}` : 'javascript:void(0)';
+  } else if (notif.type === 'reply') {
+    typeIcon = 'reply';
+    typeBg = 'bg-tertiary-container text-on-tertiary-container';
+    targetUrl = notif.post_exists && notif.post_id ? `/#${encodeURIComponent(notif.post_id)}` : 'javascript:void(0)';
+  }
+
+  let postSnippetHtml = '';
+  if (notif.post_snippet) {
+    postSnippetHtml = `
+      <div class="mt-1.5 p-2 rounded-lg bg-surface-container-low text-on-surface-variant font-caption text-caption line-clamp-2 italic border-l-2 border-outline-variant">
+        "${escapeHtml(notif.post_snippet)}"
+      </div>
+    `;
+  } else if (notif.post_id && !notif.post_exists) {
+    postSnippetHtml = `
+      <div class="mt-1 text-on-surface-variant font-caption text-caption italic opacity-75">
+        (Postingan ini telah dihapus)
+      </div>
+    `;
+  }
+
+  let cardBg = isRead
+    ? 'bg-surface-container-lowest hover:bg-surface-container-low'
+    : 'bg-surface-container-high/60 border-l-4 border-primary hover:bg-surface-container-high';
+
+  let unreadIndicator = isRead
+    ? ''
+    : `<span class="w-2.5 h-2.5 rounded-full bg-primary shrink-0" id="unread-dot-${notif._id}"></span>`;
+
+  let markReadBtn = isRead
+    ? ''
+    : `
+      <button type="button"
+              onclick="mark_single_notification_read('${notif._id}', event)"
+              class="p-1.5 rounded-full hover:bg-surface-container text-on-surface-variant hover:text-primary transition-colors border-0 bg-transparent cursor-pointer shrink-0"
+              title="Tandai telah dibaca"
+              id="mark-read-btn-${notif._id}">
+        <span class="material-symbols-outlined text-[20px]">check_circle</span>
+      </button>
+    `;
+
+  return `
+    <article class="p-space-md rounded-xl transition-all shadow-sm cursor-pointer mb-space-sm flex items-start gap-space-md ${cardBg}"
+             id="notif-card-${notif._id}"
+             onclick="handle_notification_click('${notif._id}', '${targetUrl}', ${isRead})">
+      <!-- Actor Avatar with mini type badge -->
+      <div class="relative shrink-0">
+        <a href="/user/${encodeURIComponent(notif.actor)}" onclick="event.stopPropagation();">
+          <img class="w-11 h-11 rounded-full object-cover shrink-0" src="${avatarUrl}" alt="${actorName}" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+        </a>
+        <span class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[12px] shadow-sm ${typeBg}">
+          <span class="material-symbols-outlined text-[12px] leading-none">${typeIcon}</span>
+        </span>
+      </div>
+
+      <!-- Notification Content -->
+      <div class="flex-1 min-w-0">
+        <div class="flex items-baseline gap-1.5 flex-wrap">
+          <a href="/user/${encodeURIComponent(notif.actor)}" onclick="event.stopPropagation();" class="font-label-md text-label-md text-on-surface font-semibold hover:underline no-underline">
+            ${actorName}
+          </a>
+          <span class="font-body-sm text-body-sm text-on-surface-variant">
+            ${escapeHtml(notif.message)}
+          </span>
+        </div>
+
+        ${postSnippetHtml}
+
+        <div class="flex items-center gap-2 mt-1.5 text-on-surface-variant font-caption text-caption">
+          <span>${timeStr}</span>
+        </div>
+      </div>
+
+      <!-- Read state & Action -->
+      <div class="flex items-center gap-space-xs shrink-0 self-center">
+        ${unreadIndicator}
+        ${markReadBtn}
+      </div>
+    </article>
+  `;
+}
+
+function load_notifications(cursor, append = false) {
+  if (window.notifsLoading) return;
+  window.notifsLoading = true;
+
+  if (append) {
+    $('#notif-loading').removeClass('hidden');
+    $('#notif-load-more-btn').prop('disabled', true).html('<i class="fa fa-spinner fa-spin mr-1"></i> Memuat...');
+  } else {
+    $('#notif-load-more-container').addClass('hidden');
+    $('#notifications-box').html(`
+      <div class="text-center text-on-surface-variant py-10 font-body-sm">
+        <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat notifikasi…
+      </div>
+    `);
+  }
+
+  let requestUrl = '/api/notifications?limit=20';
+  if (cursor) {
+    requestUrl += `&cursor=${encodeURIComponent(cursor)}`;
+  }
+
+  $.ajax({
+    type: 'GET',
+    url: requestUrl,
+    success: function (res) {
+      if (res.result === 'success') {
+        let notifs = res.notifications || [];
+        window.notifsNextCursor = res.next_cursor;
+        window.notifsHasMore = Boolean(res.has_more);
+
+        update_notification_badges(res.unread_count);
+
+        if (!append) {
+          $('#notifications-box').empty();
+        }
+
+        if (!notifs || notifs.length === 0) {
+          if (!append) {
+            render_empty_notifications();
+          }
+          $('#notif-load-more-container').addClass('hidden');
+          return;
+        }
+
+        for (let i = 0; i < notifs.length; i++) {
+          $('#notifications-box').append(render_notification_item(notifs[i]));
+        }
+
+        if (window.notifsHasMore) {
+          $('#notif-load-more-container').removeClass('hidden');
+          $('#notif-load-more-btn').prop('disabled', false).html('Load More');
+        } else {
+          $('#notif-load-more-container').addClass('hidden');
+        }
+      } else {
+        handle_ajax_error(null, res.msg || 'Gagal memuat notifikasi.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal memuat notifikasi.');
+    },
+    complete: function () {
+      window.notifsLoading = false;
+      $('#notif-loading').addClass('hidden');
+    }
+  });
+}
+
+function handle_notification_click(notificationId, targetUrl, isRead) {
+  if (isRead) {
+    if (targetUrl && targetUrl !== 'javascript:void(0)') {
+      window.location.href = targetUrl;
+    }
+    return;
+  }
+
+  // Tandai sebagai dibaca sebelum navigasi
+  $.ajax({
+    type: 'POST',
+    url: `/api/notifications/${encodeURIComponent(notificationId)}/read`,
+    success: function (res) {
+      if (res.result === 'success') {
+        update_notification_badges(res.unread_count);
+        let $card = $(`#notif-card-${notificationId}`);
+        $card.removeClass('bg-surface-container-high/60 border-l-4 border-primary')
+             .addClass('bg-surface-container-lowest');
+        $(`#unread-dot-${notificationId}`).remove();
+        $(`#mark-read-btn-${notificationId}`).remove();
+      }
+    },
+    complete: function () {
+      if (targetUrl && targetUrl !== 'javascript:void(0)') {
+        window.location.href = targetUrl;
+      }
+    }
+  });
+}
+
+function mark_single_notification_read(notificationId, event) {
+  if (event) {
+    event.stopPropagation();
+  }
+
+  let $btn = $(`#mark-read-btn-${notificationId}`);
+  $btn.prop('disabled', true);
+
+  $.ajax({
+    type: 'POST',
+    url: `/api/notifications/${encodeURIComponent(notificationId)}/read`,
+    success: function (res) {
+      if (res.result === 'success') {
+        update_notification_badges(res.unread_count);
+        let $card = $(`#notif-card-${notificationId}`);
+        $card.removeClass('bg-surface-container-high/60 border-l-4 border-primary')
+             .addClass('bg-surface-container-lowest');
+        $(`#unread-dot-${notificationId}`).fadeOut(200, function() { $(this).remove(); });
+        $btn.fadeOut(200, function() { $(this).remove(); });
+      } else {
+        alert(res.msg || 'Gagal menandai notifikasi dibaca.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal menandai notifikasi dibaca.');
+    }
+  });
+}
+
+function mark_all_notifications_read() {
+  let $btn = $('#mark-all-read-btn');
+  $btn.prop('disabled', true).addClass('opacity-75');
+
+  $.ajax({
+    type: 'POST',
+    url: '/api/notifications/read_all',
+    success: function (res) {
+      if (res.result === 'success') {
+        update_notification_badges(0);
+        // Ubah tampilan semua kartu notifikasi menjadi sudah dibaca
+        $('#notifications-box > article').each(function () {
+          $(this).removeClass('bg-surface-container-high/60 border-l-4 border-primary')
+                 .addClass('bg-surface-container-lowest');
+        });
+        $('[id^="unread-dot-"]').remove();
+        $('[id^="mark-read-btn-"]').remove();
+      } else {
+        alert(res.msg || 'Gagal menandai semua notifikasi dibaca.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal menandai semua notifikasi dibaca.');
+    },
+    complete: function () {
+      $btn.prop('disabled', false).removeClass('opacity-75');
+    }
+  });
+}
+
+// Global auto-fetch badge jika ada elemen badge pada halaman
+$(document).ready(function () {
+  if ($('#nav-unread-badge').length || $('#header-unread-badge').length) {
+    fetch_unread_notification_count();
+  }
+});

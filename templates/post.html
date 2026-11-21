@@ -107,7 +107,11 @@
     <!-- Center nav -->
     <nav class="hidden lg:flex items-center gap-space-md">
       <a aria-current="page" class="px-space-md py-space-xs transition-colors bg-secondary-container text-on-secondary-container font-semibold rounded-full" href="/">Timeline</a>
-      <!-- TODO: Topics, Activity pages not yet implemented -->
+      <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full no-underline" href="/bookmarks">Bookmarks</a>
+      <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full no-underline flex items-center gap-1.5" href="/notifications">
+        <span>Notifications</span>
+        <span id="header-unread-badge" class="hidden bg-primary-container text-on-primary text-[10px] font-bold px-1.5 py-0.2 rounded-full"></span>
+      </a>
     </nav>
     <!-- Right: User info + Sign Out -->
     <div class="flex items-center gap-space-md">
@@ -147,6 +151,13 @@
         <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/bookmarks">
           <span class="material-symbols-outlined text-[22px]">bookmark</span>
           <span class="font-label-md text-label-md">Bookmarks</span>
+        </a>
+        <a class="flex items-center justify-between px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/notifications" id="sidebar-notifications-link">
+          <div class="flex items-center gap-space-md">
+            <span class="material-symbols-outlined text-[22px]">notifications</span>
+            <span class="font-label-md text-label-md">Notifications</span>
+          </div>
+          <span id="nav-unread-badge" class="hidden bg-primary-container text-on-primary text-caption font-bold px-2 py-0.5 rounded-full text-[11px] leading-tight"></span>
         </a>
       </nav>
       <!-- Create Post button — scrolls/focuses composer textarea -->

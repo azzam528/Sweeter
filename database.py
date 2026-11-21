@@ -59,6 +59,14 @@ def init_indexes():
         db.bookmarks.create_index([("username", 1), ("created_at", -1)])
         # 14. Single index pada post_id untuk pembersihan referensi bookmark saat post dihapus
         db.bookmarks.create_index([("post_id", 1)])
+        # 15. Index pada (recipient, created_at) untuk listing notifikasi kronologis terbaru
+        db.notifications.create_index([("recipient", 1), ("created_at", -1)])
+        # 16. Index pada (recipient, is_read) untuk optimasi penghitungan unread count
+        db.notifications.create_index([("recipient", 1), ("is_read", 1)])
+        # 17. Compound index untuk pencegahan duplikasi notifikasi (deduplication check)
+        db.notifications.create_index([("recipient", 1), ("actor", 1), ("type", 1), ("post_id", 1)])
+        # 18. Single index pada post_id untuk cascading cleanup notifikasi saat post dihapus
+        db.notifications.create_index([("post_id", 1)])
     except Exception as e:
         print(f"Warning saat inisialisasi index MongoDB: {e}")
 
