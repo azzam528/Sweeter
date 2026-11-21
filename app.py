@@ -6,6 +6,7 @@ import warnings
 from datetime import datetime, timedelta, timezone
 from bson import ObjectId
 from bson.errors import InvalidId
+from pymongo.errors import DuplicateKeyError
 
 from flask import (
     Flask,
@@ -148,12 +149,18 @@ def user(username):
 
         status = (username == current_username)
         post_count = db.posts.count_documents({'username': username})
+        is_following = bool(db.follows.find_one({'follower': current_username, 'following': username}))
+        follower_count = db.follows.count_documents({'following': username})
+        following_count = db.follows.count_documents({'follower': username})
         return render_template(
             'user_profile.html',
             user_info=user_info,
             current_user=current_user,
             status=status,
-            post_count=post_count
+            post_count=post_count,
+            is_following=is_following,
+            follower_count=follower_count,
+            following_count=following_count
         )
     except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))
@@ -176,7 +183,17 @@ def old_user(username):
             return render_template('404.html', username=username), 404
 
         status = (username == payload.get('id'))
-        return render_template('user.html', user_info=user_info, status=status)
+        is_following = bool(db.follows.find_one({'follower': payload.get('id'), 'following': username}))
+        follower_count = db.follows.count_documents({'following': username})
+        following_count = db.follows.count_documents({'follower': username})
+        return render_template(
+            'user.html',
+            user_info=user_info,
+            status=status,
+            is_following=is_following,
+            follower_count=follower_count,
+            following_count=following_count
+        )
     except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))
     
@@ -721,6 +738,352 @@ def secret():
         )
         user_info = db.users.find_one({'username': payload.get('id')})
         return render_template('secret.html' , user_info=user_info)
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return redirect(url_for('home'))  
+
+
+# ==========================================
+# FOLLOW & UNFOLLOW SUBSYSTEM (SWEETER V2)
+# ==========================================
+
+def _extract_target_username(param_username=None):
+    """Mengekstrak target username dari route parameter, JSON body, atau form-data."""
+    if param_username and isinstance(param_username, str) and param_username.strip():
+        return param_username.strip()
+
+    if request.is_json:
+        json_data = request.get_json(silent=True) or {}
+        val = json_data.get('target_username') or json_data.get('target_username_give')
+        if val and isinstance(val, str) and val.strip():
+            return val.strip()
+
+    form_val = request.form.get('target_username_give') or request.form.get('target_username')
+    if form_val and isinstance(form_val, str) and form_val.strip():
+        return form_val.strip()
+
+    arg_val = request.args.get('target_username') or request.args.get('target_username_give')
+    if arg_val and isinstance(arg_val, str) and arg_val.strip():
+        return arg_val.strip()
+
+    return None
+
+
+@app.route('/api/follow', methods=['POST'])
+@app.route('/api/users/<target_username>/follow', methods=['POST'])
+def follow_user(target_username=None):
+    """
+    Endpoint untuk mengikuti (follow) pengguna lain.
+    Menerima target_username via URL parameter, JSON, atau form-data.
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    target = _extract_target_username(target_username)
+    if not target:
+        return jsonify({'result': 'fail', 'msg': 'Target username is required'}), 400
+
+    # Aturan 1: Tidak dapat mengikuti diri sendiri
+    if current_username == target:
+        return jsonify({'result': 'fail', 'msg': 'You cannot follow yourself'}), 400
+
+    # Aturan 2: Target user harus terdaftar di db.users
+    target_user = db.users.find_one({'username': target})
+    if not target_user:
+        return jsonify({'result': 'fail', 'msg': 'User not found'}), 404
+
+    # Aturan 3: Cegah duplicate follow (race-safe & idempotent)
+    existing = db.follows.find_one({'follower': current_username, 'following': target})
+    if existing:
+        follower_count = db.follows.count_documents({'following': target})
+        following_count = db.follows.count_documents({'follower': current_username})
+        return jsonify({
+            'result': 'fail',
+            'msg': 'You are already following this user',
+            'is_following': True,
+            'follower_count': follower_count,
+            'following_count': following_count
+        }), 409
+
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        db.follows.insert_one({
+            'follower': current_username,
+            'following': target,
+            'created_at': now
+        })
+    except DuplicateKeyError:
+        follower_count = db.follows.count_documents({'following': target})
+        following_count = db.follows.count_documents({'follower': current_username})
+        return jsonify({
+            'result': 'fail',
+            'msg': 'You are already following this user',
+            'is_following': True,
+            'follower_count': follower_count,
+            'following_count': following_count
+        }), 409
+
+    follower_count = db.follows.count_documents({'following': target})
+    following_count = db.follows.count_documents({'follower': current_username})
+
+    return jsonify({
+        'result': 'success',
+        'msg': f'Successfully followed {target}',
+        'is_following': True,
+        'follower_count': follower_count,
+        'following_count': following_count
+    }), 200
+
+
+@app.route('/api/unfollow', methods=['POST'])
+@app.route('/api/users/<target_username>/unfollow', methods=['POST'])
+def unfollow_user(target_username=None):
+    """
+    Endpoint untuk berhenti mengikuti (unfollow) pengguna lain.
+    Idempotent & aman meskipun relasi follow belum pernah ada.
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    target = _extract_target_username(target_username)
+    if not target:
+        return jsonify({'result': 'fail', 'msg': 'Target username is required'}), 400
+
+    if current_username == target:
+        return jsonify({'result': 'fail', 'msg': 'You cannot unfollow yourself'}), 400
+
+    # Hapus relasi follow secara aman
+    db.follows.delete_one({'follower': current_username, 'following': target})
+
+    follower_count = db.follows.count_documents({'following': target})
+    following_count = db.follows.count_documents({'follower': current_username})
+
+    return jsonify({
+        'result': 'success',
+        'msg': f'Successfully unfollowed {target}',
+        'is_following': False,
+        'follower_count': follower_count,
+        'following_count': following_count
+    }), 200
+
+
+@app.route('/api/follow_status', methods=['GET'])
+def follow_status():
+    """
+    Memeriksa status follow antara pengguna saat ini dan target username.
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    target = _extract_target_username()
+    if not target:
+        return jsonify({'result': 'fail', 'msg': 'Target username is required'}), 400
+
+    target_user = db.users.find_one({'username': target})
+    if not target_user:
+        return jsonify({'result': 'fail', 'msg': 'User not found'}), 404
+
+    is_following = bool(db.follows.find_one({'follower': current_username, 'following': target}))
+    follower_count = db.follows.count_documents({'following': target})
+    following_count = db.follows.count_documents({'follower': target})
+
+    return jsonify({
+        'result': 'success',
+        'target_username': target,
+        'is_following': is_following,
+        'follower_count': follower_count,
+        'following_count': following_count
+    }), 200
+
+
+@app.route('/api/users/<username>/followers', methods=['GET'])
+def get_user_followers_api(username):
+    """
+    API JSON untuk mengambil daftar akun yang mengikuti pengguna tertentu.
+    """
+    target_user = db.users.find_one({'username': username})
+    if not target_user:
+        return jsonify({'result': 'fail', 'msg': 'User not found'}), 404
+
+    # Identifikasi current_user jika ada cookie mytoken
+    token_receive = request.cookies.get('mytoken')
+    current_username = None
+    if token_receive:
+        try:
+            payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+            current_username = payload.get('id')
+        except Exception:
+            current_username = None
+
+    follow_docs = list(db.follows.find({'following': username}).sort('created_at', -1))
+    follower_usernames = [d['follower'] for d in follow_docs]
+
+    user_docs = {
+        u['username']: u
+        for u in db.users.find({'username': {'$in': follower_usernames}}, {'password': 0})
+    }
+
+    # Kumpulkan akun yang diikuti oleh current_user untuk penanda status is_following
+    my_followings = set()
+    if current_username:
+        my_follow_docs = db.follows.find({
+            'follower': current_username,
+            'following': {'$in': follower_usernames}
+        })
+        my_followings = {f['following'] for f in my_follow_docs}
+
+    followers_list = []
+    for uname in follower_usernames:
+        u = user_docs.get(uname)
+        if u:
+            followers_list.append({
+                'username': u.get('username'),
+                'profile_name': u.get('profile_name', u.get('username')),
+                'profile_pic_real': u.get('profile_pic_real', 'profile_pics/profile_placeholder.png'),
+                'profile_info': u.get('profile_info', ''),
+                'is_following': uname in my_followings,
+                'is_self': (uname == current_username)
+            })
+
+    return jsonify({
+        'result': 'success',
+        'username': username,
+        'total': len(followers_list),
+        'users': followers_list
+    }), 200
+
+
+@app.route('/api/users/<username>/following', methods=['GET'])
+def get_user_following_api(username):
+    """
+    API JSON untuk mengambil daftar akun yang diikuti oleh pengguna tertentu.
+    """
+    target_user = db.users.find_one({'username': username})
+    if not target_user:
+        return jsonify({'result': 'fail', 'msg': 'User not found'}), 404
+
+    token_receive = request.cookies.get('mytoken')
+    current_username = None
+    if token_receive:
+        try:
+            payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+            current_username = payload.get('id')
+        except Exception:
+            current_username = None
+
+    follow_docs = list(db.follows.find({'follower': username}).sort('created_at', -1))
+    following_usernames = [d['following'] for d in follow_docs]
+
+    user_docs = {
+        u['username']: u
+        for u in db.users.find({'username': {'$in': following_usernames}}, {'password': 0})
+    }
+
+    my_followings = set()
+    if current_username:
+        my_follow_docs = db.follows.find({
+            'follower': current_username,
+            'following': {'$in': following_usernames}
+        })
+        my_followings = {f['following'] for f in my_follow_docs}
+
+    following_list = []
+    for uname in following_usernames:
+        u = user_docs.get(uname)
+        if u:
+            following_list.append({
+                'username': u.get('username'),
+                'profile_name': u.get('profile_name', u.get('username')),
+                'profile_pic_real': u.get('profile_pic_real', 'profile_pics/profile_placeholder.png'),
+                'profile_info': u.get('profile_info', ''),
+                'is_following': uname in my_followings,
+                'is_self': (uname == current_username)
+            })
+
+    return jsonify({
+        'result': 'success',
+        'username': username,
+        'total': len(following_list),
+        'users': following_list
+    }), 200
+
+
+@app.route('/user/<username>/followers', methods=['GET'])
+def user_followers_page(username):
+    """Halaman daftar pengikut (followers) seorang pengguna."""
+    token_receive = request.cookies.get('mytoken')
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+        current_user = db.users.find_one({'username': current_username}, {'_id': False})
+        user_info = db.users.find_one({'username': username}, {'_id': False})
+        if not user_info:
+            return render_template('404.html', username=username, current_user=current_user), 404
+
+        follower_count = db.follows.count_documents({'following': username})
+        following_count = db.follows.count_documents({'follower': username})
+        is_following = bool(db.follows.find_one({'follower': current_username, 'following': username}))
+
+        return render_template(
+            'user_follows.html',
+            user_info=user_info,
+            current_user=current_user,
+            status=(username == current_username),
+            active_tab='followers',
+            follower_count=follower_count,
+            following_count=following_count,
+            is_following=is_following
+        )
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return redirect(url_for('home'))
+
+
+@app.route('/user/<username>/following', methods=['GET'])
+def user_following_page(username):
+    """Halaman daftar akun yang diikuti (following) oleh seorang pengguna."""
+    token_receive = request.cookies.get('mytoken')
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+        current_user = db.users.find_one({'username': current_username}, {'_id': False})
+        user_info = db.users.find_one({'username': username}, {'_id': False})
+        if not user_info:
+            return render_template('404.html', username=username, current_user=current_user), 404
+
+        follower_count = db.follows.count_documents({'following': username})
+        following_count = db.follows.count_documents({'follower': username})
+        is_following = bool(db.follows.find_one({'follower': current_username, 'following': username}))
+
+        return render_template(
+            'user_follows.html',
+            user_info=user_info,
+            current_user=current_user,
+            status=(username == current_username),
+            active_tab='following',
+            follower_count=follower_count,
+            following_count=following_count,
+            is_following=is_following
+        )
     except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))  
 

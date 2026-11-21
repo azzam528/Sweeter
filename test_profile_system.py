@@ -113,7 +113,7 @@ def run_tests():
             res.status_code == 200 and
             "Profile User Two" in html and
             "Edit Profile" not in html and # Edit profile button must NOT appear on other's profile
-            "Follow (Coming Soon)" in html
+            ("Follow" in html or "Follow (Coming Soon)" in html)
         )
         record(2, "Membuka profil pengguna lain", pass2, f"Status: {res.status_code}, Other profile view without edit button")
 

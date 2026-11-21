@@ -206,10 +206,23 @@
                   Edit Profile
                 </button>
                 {% else %}
-                <!-- Other user's profile: Follow feature not yet supported by database schema (TODO) -->
-                <button class="px-4 py-1.5 rounded-full bg-surface-container text-on-surface-variant font-label-md text-label-md shadow-sm opacity-60 cursor-not-allowed border-0" title="Follow feature coming soon (TODO)" disabled>
-                  Follow (Coming Soon)
+                <!-- Other user's profile: Follow / Following button -->
+                {% if is_following %}
+                <button id="follow-btn"
+                        data-username="{{ user_info.username | e }}"
+                        data-following="true"
+                        class="px-5 py-1.5 rounded-full bg-surface-container-high hover:bg-error-container hover:text-on-error-container text-on-surface font-label-md text-label-md transition-all duration-150 shadow-sm border border-outline-variant cursor-pointer group">
+                  <span class="group-hover:hidden">Following</span>
+                  <span class="hidden group-hover:inline">Unfollow</span>
                 </button>
+                {% else %}
+                <button id="follow-btn"
+                        data-username="{{ user_info.username | e }}"
+                        data-following="false"
+                        class="px-5 py-1.5 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-all duration-150 shadow-sm border-0 cursor-pointer">
+                  Follow
+                </button>
+                {% endif %}
                 {% endif %}
               </div>
             </div>
@@ -233,10 +246,17 @@
                 <span class="font-headline-sm text-headline-sm font-bold text-on-surface">{{ post_count }}</span>
                 <span class="font-body-sm text-body-sm text-secondary">Posts</span>
               </div>
-              <!-- Note: Followers & Following not yet in DB schema -->
-              <div class="flex items-baseline gap-1.5 text-on-surface-variant text-body-sm">
-                <span class="font-caption text-caption text-secondary">Followers &amp; Following (Coming Soon)</span>
-              </div>
+              <!-- Followers & Following stats linking to lists -->
+              <a href="/user/{{ user_info.username | e }}/followers"
+                 class="flex items-baseline gap-1.5 no-underline hover:underline cursor-pointer text-on-surface">
+                <span class="font-headline-sm text-headline-sm font-bold text-on-surface" id="follower-count-display">{{ follower_count }}</span>
+                <span class="font-body-sm text-body-sm text-secondary">Followers</span>
+              </a>
+              <a href="/user/{{ user_info.username | e }}/following"
+                 class="flex items-baseline gap-1.5 no-underline hover:underline cursor-pointer text-on-surface">
+                <span class="font-headline-sm text-headline-sm font-bold text-on-surface" id="following-count-display">{{ following_count }}</span>
+                <span class="font-body-sm text-body-sm text-secondary">Following</span>
+              </a>
             </div>
 
           </div>
@@ -373,6 +393,12 @@
       } else {
         prompt('Copy profile link:', shareUrl);
       }
+    });
+
+    // Follow / Unfollow button handler
+    $('#follow-btn').on('click', function () {
+      var targetUsername = $(this).attr('data-username');
+      toggle_follow(targetUsername, '#follow-btn', '#follower-count-display');
     });
 
     {% if status %}

@@ -39,6 +39,12 @@ def init_indexes():
         db.comments.create_index([("username", 1)])
         # 5. Single index pada created_at untuk rentang waktu
         db.comments.create_index([("created_at", 1)])
+        # 6. Compound unique index pada db.follows: mencegah duplicate follow & race condition
+        db.follows.create_index([("follower", 1), ("following", 1)], unique=True)
+        # 7. Single index pada following: pencarian cepat daftar follower pengguna
+        db.follows.create_index([("following", 1)])
+        # 8. Single index pada follower: pencarian cepat akun yang diikuti pengguna
+        db.follows.create_index([("follower", 1)])
     except Exception as e:
         print(f"Warning saat inisialisasi index MongoDB: {e}")
 
@@ -51,3 +57,24 @@ def check_connection():
     """Memeriksa apakah MongoDB dapat dihubungi."""
     client.admin.command("ping")
     return True
+
+
+def is_following(follower: str, following: str) -> bool:
+    """Memeriksa apakah follower sedang mengikuti following."""
+    if not follower or not following:
+        return False
+    return bool(db.follows.find_one({"follower": follower, "following": following}))
+
+
+def count_followers(username: str) -> int:
+    """Menghitung jumlah follower dari seorang pengguna."""
+    if not username:
+        return 0
+    return db.follows.count_documents({"following": username})
+
+
+def count_following(username: str) -> int:
+    """Menghitung jumlah akun yang diikuti oleh seorang pengguna."""
+    if not username:
+        return 0
+    return db.follows.count_documents({"follower": username})

@@ -852,3 +852,55 @@ function update_comment_counter(post_id, delta) {
     $counter.text(updated > 0 ? num2str(updated) : '0');
   }
 }
+
+// ==========================================
+// FOLLOW & UNFOLLOW SYSTEM FUNCTIONS (SWEETER V2)
+// ==========================================
+
+function toggle_follow(target_username, btnSelector, countSelector) {
+  let $btn = btnSelector ? $(btnSelector) : $('#follow-btn');
+  let $count = countSelector ? $(countSelector) : $('#follower-count-display');
+
+  if (!$btn.length || !target_username) return;
+
+  let isFollowing = $btn.attr('data-following') === 'true';
+  let endpoint = isFollowing ? '/api/unfollow' : '/api/follow';
+
+  $btn.prop('disabled', true).addClass('opacity-75');
+
+  $.ajax({
+    type: 'POST',
+    url: endpoint,
+    data: {
+      target_username_give: target_username
+    },
+    success: function (res) {
+      if (res.result === 'success') {
+        let nowFollowing = Boolean(res.is_following);
+        $btn.attr('data-following', nowFollowing ? 'true' : 'false');
+
+        if (nowFollowing) {
+          $btn.removeClass('bg-primary-container text-on-primary hover:bg-primary border-0')
+              .addClass('bg-surface-container-high text-on-surface border border-outline-variant group hover:bg-error-container hover:text-on-error-container')
+              .html('<span class="group-hover:hidden">Following</span><span class="hidden group-hover:inline">Unfollow</span>');
+        } else {
+          $btn.removeClass('bg-surface-container-high text-on-surface border border-outline-variant group hover:bg-error-container hover:text-on-error-container')
+              .addClass('bg-primary-container text-on-primary hover:bg-primary border-0')
+              .html('Follow');
+        }
+
+        if ($count.length && res.follower_count !== undefined) {
+          $count.text(res.follower_count);
+        }
+      } else {
+        alert(res.msg || 'Aksi follow/unfollow gagal.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal memproses aksi follow/unfollow.');
+    },
+    complete: function () {
+      $btn.prop('disabled', false).removeClass('opacity-75');
+    }
+  });
+}
