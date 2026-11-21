@@ -365,69 +365,166 @@ def posting():
     
 @app.route('/get_posts', methods=['GET'])
 def get_posts():
+    """
+    Endpoint pengambilan feed postingan dengan dukungan:
+    1. Personalized Timeline (Following + Current User) secara default
+    2. Explore / Global feed (tab=explore)
+    3. Profile feed (username_give=<username>)
+    4. Keyset Cursor Pagination (cursor=<last_post_id>, limit=20)
+    5. Batch Aggregation tanpa N+1 query loop
+    """
     token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
     try:
         payload = jwt.decode(
             token_receive,
             SECRET_KEY,
             algorithms=['HS256']
         )
-        username_receive = request.args.get('username_give', '').strip()
-        query = {'username': username_receive} if username_receive else {}
-        posts = list(db.posts.find(query).sort('date', -1).limit(20))
-
-        # Batch count komentar untuk seluruh postingan yang diambil dalam satu query agregasi
-        post_ids = [str(post['_id']) for post in posts]
-        comment_counts = {}
-        if post_ids:
-            pipeline = [
-                {'$match': {'post_id': {'$in': post_ids}}},
-                {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
-            ]
-            for item in db.comments.aggregate(pipeline):
-                comment_counts[item['_id']] = item['count']
-
-        for post in posts:
-            post['_id'] = str(post['_id'])    
-            post['count_heart'] = db.likes.count_documents({
-                'post_id': post['_id'],
-                'type' : 'heart',
-            })
-            post['heart_by_me'] = bool(db.likes.find_one({
-                'post_id': post['_id'],
-                'type' : 'heart',
-                'username' : payload.get('id')
-            }))
-            post['_id'] = str(post['_id'])    
-            post['count_stars'] = db.stars.count_documents({
-                'post_id': post['_id'],
-                'type' : 'stars',
-            })
-            post['stars_by_me'] = bool(db.stars.find_one({
-                'post_id': post['_id'],
-                'type' : 'stars',
-                'username' : payload.get('id')
-            }))
-            post['_id'] = str(post['_id'])    
-            post['count_thumbs'] = db.thumbs.count_documents({
-                'post_id': post['_id'],
-                'type' : 'thumbs',
-            })
-            post['thumbs_by_me'] = bool(db.thumbs.find_one({
-                'post_id': post['_id'],
-                'type' : 'thumbs',
-                'username' : payload.get('id')
-            }))
-            # Jumlah total komentar (termasuk reply dan soft-deleted)
-            post['count_comments'] = comment_counts.get(post['_id'], 0)
-
-        return jsonify({
-            'result': 'success',
-            'msg' : ' Successfully fetched all posts',
-            'posts': posts,
-        })
+        current_username = payload.get('id')
     except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
-        return redirect(url_for('home'))    
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    # 1. Parsing & validasi parameter
+    username_receive = request.args.get('username_give', '').strip()
+    tab = request.args.get('tab', '').lower().strip()
+    cursor = request.args.get('cursor', '').strip()
+    limit_raw = request.args.get('limit', '20').strip()
+
+    try:
+        limit = int(limit_raw)
+        if limit <= 0 or limit > 50:
+            limit = 20
+    except ValueError:
+        return jsonify({'result': 'fail', 'msg': 'Invalid limit parameter'}), 400
+
+    # 2. Penentuan filter pengguna (Author Filter)
+    if username_receive:
+        # Mode Profil: hanya postingan milik pengguna yang diminta
+        query = {'username': username_receive}
+    elif tab in ['following', 'timeline']:
+        # Mode Personalized Timeline: postingan diri sendiri + akun yang diikuti
+        following_users = db.follows.distinct('following', {'follower': current_username})
+        allowed_authors = [current_username] + following_users
+        query = {'username': {'$in': allowed_authors}}
+    else:
+        # Mode Explore / All / Default (mempertahankan kompatibilitas endpoint lama): semua postingan publik
+        query = {}
+
+    # 3. Penanganan Cursor Pagination (Keyset Pagination)
+    if cursor:
+        if ObjectId.is_valid(cursor):
+            anchor_post = db.posts.find_one({'_id': ObjectId(cursor)})
+            if not anchor_post:
+                return jsonify({'result': 'fail', 'msg': 'Cursor not found'}), 404
+            cursor_date = anchor_post.get('date', '')
+            cursor_id = anchor_post['_id']
+            pagination_filter = {
+                '$or': [
+                    {'date': {'$lt': cursor_date}},
+                    {'date': cursor_date, '_id': {'$lt': cursor_id}}
+                ]
+            }
+            if query:
+                query = {'$and': [query, pagination_filter]}
+            else:
+                query = pagination_filter
+        elif cursor.count('-') >= 2 or cursor.count('.') >= 2:
+            pagination_filter = {'date': {'$lt': cursor}}
+            if query:
+                query = {'$and': [query, pagination_filter]}
+            else:
+                query = pagination_filter
+        else:
+            return jsonify({'result': 'fail', 'msg': 'Invalid cursor parameter'}), 400
+
+    # 4. Eksekusi query dengan pengurutan kronologis terbaru (Newest First)
+    posts = list(db.posts.find(query).sort([('date', -1), ('_id', -1)]).limit(limit))
+
+    # 5. Batch Aggregation untuk komentar dan reaksi (Menghilangkan N+1 Query Storm)
+    post_ids = [str(post['_id']) for post in posts]
+    comment_counts = {}
+    heart_counts = {}
+    stars_counts = {}
+    thumbs_counts = {}
+    my_hearts = set()
+    my_stars = set()
+    my_thumbs = set()
+
+    if post_ids:
+        # Batch count komentar
+        pipeline_comments = [
+            {'$match': {'post_id': {'$in': post_ids}}},
+            {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
+        ]
+        for item in db.comments.aggregate(pipeline_comments):
+            comment_counts[item['_id']] = item['count']
+
+        # Batch count hearts
+        pipeline_hearts = [
+            {'$match': {'post_id': {'$in': post_ids}, 'type': 'heart'}},
+            {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
+        ]
+        for item in db.likes.aggregate(pipeline_hearts):
+            heart_counts[item['_id']] = item['count']
+
+        # Batch count stars
+        pipeline_stars = [
+            {'$match': {'post_id': {'$in': post_ids}, 'type': 'stars'}},
+            {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
+        ]
+        for item in db.stars.aggregate(pipeline_stars):
+            stars_counts[item['_id']] = item['count']
+
+        # Batch count thumbs
+        pipeline_thumbs = [
+            {'$match': {'post_id': {'$in': post_ids}, 'type': 'thumbs'}},
+            {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
+        ]
+        for item in db.thumbs.aggregate(pipeline_thumbs):
+            thumbs_counts[item['_id']] = item['count']
+
+        # Status reaksi pengguna saat ini dalam satu query distinct per tipe
+        my_hearts = set(db.likes.distinct('post_id', {
+            'post_id': {'$in': post_ids},
+            'type': 'heart',
+            'username': current_username
+        }))
+        my_stars = set(db.stars.distinct('post_id', {
+            'post_id': {'$in': post_ids},
+            'type': 'stars',
+            'username': current_username
+        }))
+        my_thumbs = set(db.thumbs.distinct('post_id', {
+            'post_id': {'$in': post_ids},
+            'type': 'thumbs',
+            'username': current_username
+        }))
+
+    for post in posts:
+        pid = str(post['_id'])
+        post['_id'] = pid
+        post['count_heart'] = heart_counts.get(pid, 0)
+        post['heart_by_me'] = pid in my_hearts
+        post['count_stars'] = stars_counts.get(pid, 0)
+        post['stars_by_me'] = pid in my_stars
+        post['count_thumbs'] = thumbs_counts.get(pid, 0)
+        post['thumbs_by_me'] = pid in my_thumbs
+        post['count_comments'] = comment_counts.get(pid, 0)
+
+    has_more = (len(posts) == limit)
+    next_cursor = str(posts[-1]['_id']) if has_more else None
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Successfully fetched posts',
+        'posts': posts,
+        'next_cursor': next_cursor,
+        'has_more': has_more,
+        'tab': tab if not username_receive else 'profile'
+    }), 200    
     
     
 @app.route('/update_like' , methods=['POST'])

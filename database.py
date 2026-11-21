@@ -45,6 +45,14 @@ def init_indexes():
         db.follows.create_index([("following", 1)])
         # 8. Single index pada follower: pencarian cepat akun yang diikuti pengguna
         db.follows.create_index([("follower", 1)])
+        # 9. Single index pada date: pengurutan feed kronologis terbaru
+        db.posts.create_index([("date", -1)])
+        # 10. Compound index pada (username, date): filter efisien timeline & profil
+        db.posts.create_index([("username", 1), ("date", -1)])
+        # 11. Compound index pada koleksi reaksi untuk batch aggregation cepat
+        db.likes.create_index([("post_id", 1), ("type", 1)])
+        db.stars.create_index([("post_id", 1), ("type", 1)])
+        db.thumbs.create_index([("post_id", 1), ("type", 1)])
     except Exception as e:
         print(f"Warning saat inisialisasi index MongoDB: {e}")
 

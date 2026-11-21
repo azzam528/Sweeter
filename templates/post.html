@@ -176,14 +176,23 @@
       <div class="flex flex-col w-full">
 
         <!-- Sticky Feed Header -->
-        <section class="sticky top-16 z-20 backdrop-blur-md bg-surface/90 px-space-md py-space-sm mb-space-md">
+        <section class="sticky top-16 z-20 backdrop-blur-md bg-surface/90 px-space-md py-space-sm mb-space-md border-b border-surface-container/60">
           <div class="flex items-center justify-between">
-            <div class="flex items-center gap-space-lg">
-              <button class="relative pb-space-xs font-label-md text-label-md text-primary font-bold">
-                <span>For You</span>
-                <span class="absolute bottom-0 left-0 right-0 h-[2.5px] bg-primary-container rounded-full"></span>
+            <div class="flex items-center gap-space-lg" id="feed-tabs">
+              <button id="tab-following"
+                      class="feed-tab relative pb-space-xs font-label-md text-label-md text-primary font-bold cursor-pointer border-0 bg-transparent transition-colors"
+                      data-tab="following"
+                      onclick="switch_feed_tab('following')">
+                <span>Following</span>
+                <span class="tab-indicator absolute bottom-0 left-0 right-0 h-[2.5px] bg-primary-container rounded-full"></span>
               </button>
-              <!-- TODO: "Following" feed not yet implemented -->
+              <button id="tab-explore"
+                      class="feed-tab relative pb-space-xs font-label-md text-label-md text-on-surface-variant hover:text-on-surface cursor-pointer border-0 bg-transparent transition-colors"
+                      data-tab="explore"
+                      onclick="switch_feed_tab('explore')">
+                <span>Explore</span>
+                <span class="tab-indicator hidden absolute bottom-0 left-0 right-0 h-[2.5px] bg-primary-container rounded-full"></span>
+              </button>
             </div>
           </div>
         </section>
@@ -216,7 +225,23 @@
         <!-- ===== DYNAMIC FEED STREAM ===== -->
         <!-- Posts rendered here by get_posts() in myjs.js -->
         <div id="post-box" class="flex flex-col gap-space-md">
-          <div class="text-center text-on-surface-variant py-8 font-body-sm">Loading posts…</div>
+          <div class="text-center text-on-surface-variant py-8 font-body-sm">
+            <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat postingan…
+          </div>
+        </div>
+
+        <!-- Feed loading spinner for pagination -->
+        <div id="feed-loading" class="hidden text-center py-6 text-on-surface-variant font-body-sm">
+          <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat postingan berikutnya...
+        </div>
+
+        <!-- Load More Container -->
+        <div id="load-more-container" class="hidden text-center py-6">
+          <button id="load-more-btn"
+                  onclick="load_more_posts()"
+                  class="px-6 py-2.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md text-label-md transition-all duration-150 shadow-sm border border-outline-variant cursor-pointer">
+            Load More
+          </button>
         </div>
 
       </div>
@@ -268,8 +293,8 @@
 <script>
   $(document).ready(function () {
 
-    // Load all posts into #post-box on page load
-    get_posts();
+    // Load personalized timeline posts on initial load
+    get_posts('', 'following', '', false);
 
     // ---- Create Post ----
     $('#post-submit-btn').on('click', function () {
@@ -278,10 +303,7 @@
         alert('Post content cannot be empty.');
         return;
       }
-      var today = new Date();
-      var dateStr = today.getFullYear() + '.' +
-                    String(today.getMonth() + 1).padStart(2, '0') + '.' +
-                    String(today.getDate()).padStart(2, '0');
+      var dateStr = new Date().toISOString();
 
       $.ajax({
         type: 'POST',
@@ -290,7 +312,8 @@
         success: function (response) {
           if (response.result === 'success') {
             $('#post-textarea').val('');
-            get_posts();
+            // Reload current active feed tab
+            get_posts('', window.currentFeedTab || 'following', '', false);
           } else {
             alert('Failed to post: ' + (response.msg || 'Unknown error'));
           }
@@ -317,6 +340,15 @@
     $('#open-create-post-btn').on('click', function () {
       $('#post-textarea').focus();
       $('html, body').animate({ scrollTop: $('#post-composer').offset().top - 80 }, 300);
+    });
+
+    // Infinite scroll handler
+    $(window).on('scroll', function () {
+      if ($(window).scrollTop() + $(window).height() >= $(document).height() - 250) {
+        if (window.feedHasMore && !window.feedLoading && window.feedNextCursor) {
+          load_more_posts();
+        }
+      }
     });
 
   });

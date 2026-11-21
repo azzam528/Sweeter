@@ -113,38 +113,148 @@ function post() {
   });
 }
 
+// ==========================================
+// FEED & TIMELINE CONTROLLERS (SWEETER V2)
+// ==========================================
+
+window.currentFeedTab = 'following';
+window.feedNextCursor = null;
+window.feedHasMore = false;
+window.feedLoading = false;
+window.currentProfileUsername = '';
+
+function switch_feed_tab(targetTab) {
+  if (targetTab !== 'following' && targetTab !== 'explore') {
+    targetTab = 'following';
+  }
+  window.currentFeedTab = targetTab;
+  window.feedNextCursor = null;
+  window.feedHasMore = false;
+
+  $('.feed-tab').removeClass('text-primary font-bold').addClass('text-on-surface-variant font-medium');
+  $('.feed-tab .tab-indicator').addClass('hidden');
+
+  let $activeBtn = $(`#tab-${targetTab}`);
+  $activeBtn.removeClass('text-on-surface-variant font-medium').addClass('text-primary font-bold');
+  $activeBtn.find('.tab-indicator').removeClass('hidden');
+
+  get_posts('', targetTab, '', false);
+}
+
+function load_more_posts() {
+  if (window.feedLoading || !window.feedHasMore || !window.feedNextCursor) return;
+  get_posts(window.currentProfileUsername || '', window.currentFeedTab || 'following', window.feedNextCursor, true);
+}
+
 // --- Pengambilan & Rendering Feed Postingan ---
 
-function get_posts(username) {
-  if (username == undefined) {
+function get_posts(username, tab, cursor, append = false) {
+  if (username === undefined || username === null) {
     username = '';
   }
-  $('#post-box').empty();
+  if (!tab) {
+    tab = window.currentFeedTab || 'following';
+  }
+  if (!cursor) {
+    cursor = '';
+  }
+
+  window.currentProfileUsername = username;
+  window.feedLoading = true;
+
+  let isStitch = $('body').hasClass('bg-background');
+
+  if (append) {
+    $('#feed-loading').removeClass('hidden');
+    $('#load-more-btn').prop('disabled', true).html('<i class="fa fa-spinner fa-spin mr-1"></i> Memuat...');
+  } else {
+    $('#load-more-container').addClass('hidden');
+    if (isStitch) {
+      $('#post-box').html(`
+        <div class="text-center text-on-surface-variant py-8 font-body-sm">
+          <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat postingan…
+        </div>
+      `);
+    } else {
+      $('#post-box').html(`
+        <div class="has-text-centered py-6">
+          <span class="icon"><i class="fa fa-spinner fa-spin"></i></span>
+          <p class="has-text-grey is-size-7 mt-1">Memuat postingan...</p>
+        </div>
+      `);
+    }
+  }
+
+  let requestUrl = `/get_posts?username_give=${encodeURIComponent(username)}&tab=${encodeURIComponent(tab)}&limit=10`;
+  if (cursor) {
+    requestUrl += `&cursor=${encodeURIComponent(cursor)}`;
+  }
+
   $.ajax({
     type: 'GET',
-    url: `/get_posts?username_give=${username}`,
+    url: requestUrl,
     data: {},
     success: function (response) {
       if (response['result'] === 'success') {
-        let posts = response['posts'];
-        let isStitch = $('body').hasClass('bg-background');
+        let posts = response['posts'] || [];
+
+        window.feedNextCursor = response['next_cursor'];
+        window.feedHasMore = Boolean(response['has_more']);
+
+        if (!append) {
+          $('#post-box').empty();
+        }
 
         if (!posts || posts.length === 0) {
-          if (isStitch) {
-            $('#post-box').html(`
-              <div class="text-center text-on-surface-variant py-12 bg-surface-container-lowest rounded-xl p-6 shadow-sm">
-                <span class="material-symbols-outlined text-[36px] text-outline block mb-2 mx-auto">article</span>
-                <p class="font-body-md text-body-md text-on-surface font-semibold mb-1">Belum ada postingan</p>
-                <p class="font-caption text-caption text-on-surface-variant">Pengguna ini belum membagikan kiriman apapun.</p>
-              </div>
-            `);
-          } else {
-            $('#post-box').html(`
-              <div class="has-text-centered has-text-grey py-6">
-                <p>Belum ada postingan.</p>
-              </div>
-            `);
+          if (!append) {
+            if (isStitch) {
+              if (username) {
+                // Empty state profil
+                $('#post-box').html(`
+                  <div class="text-center text-on-surface-variant py-12 bg-surface-container-lowest rounded-xl p-6 shadow-sm">
+                    <span class="material-symbols-outlined text-[36px] text-outline block mb-2 mx-auto">article</span>
+                    <p class="font-body-md text-body-md text-on-surface font-semibold mb-1">Belum ada postingan</p>
+                    <p class="font-caption text-caption text-on-surface-variant">Pengguna ini belum membagikan kiriman apapun.</p>
+                  </div>
+                `);
+              } else if (tab === 'following') {
+                // Empty state timeline personal
+                $('#post-box').html(`
+                  <div class="text-center py-12 px-6 bg-surface-container-lowest rounded-xl shadow-sm my-2">
+                    <span class="material-symbols-outlined text-[44px] text-outline-variant mb-2 block mx-auto">group_add</span>
+                    <h3 class="font-headline-sm text-[17px] font-bold text-on-surface mb-1">Timeline Anda masih sepi</h3>
+                    <p class="font-body-sm text-secondary max-w-sm mx-auto mb-4 leading-relaxed">
+                      Ikuti pengguna lain untuk melihat kiriman mereka di sini, atau beralih ke tab Jelajahi untuk melihat kiriman publik.
+                    </p>
+                    <button type="button" onclick="switch_feed_tab('explore')" class="px-5 py-2 rounded-full bg-primary-container text-on-primary font-label-md text-label-md hover:bg-primary transition-all border-0 cursor-pointer shadow-sm">
+                      Jelajahi Postingan
+                    </button>
+                  </div>
+                `);
+              } else {
+                // Empty state explore
+                $('#post-box').html(`
+                  <div class="text-center py-12 px-6 bg-surface-container-lowest rounded-xl shadow-sm my-2">
+                    <span class="material-symbols-outlined text-[44px] text-outline-variant mb-2 block mx-auto">edit_note</span>
+                    <h3 class="font-headline-sm text-[17px] font-bold text-on-surface mb-1">Belum ada postingan publik</h3>
+                    <p class="font-body-sm text-secondary max-w-sm mx-auto mb-4 leading-relaxed">
+                      Jadilah orang pertama yang membagikan pemikiran Anda di Sweeter!
+                    </p>
+                    <button type="button" onclick="$('#post-textarea').focus()" class="px-5 py-2 rounded-full bg-primary-container text-on-primary font-label-md text-label-md hover:bg-primary transition-all border-0 cursor-pointer shadow-sm">
+                      Tulis Postingan
+                    </button>
+                  </div>
+                `);
+              }
+            } else {
+              $('#post-box').html(`
+                <div class="has-text-centered has-text-grey py-6">
+                  <p>Belum ada postingan.</p>
+                </div>
+              `);
+            }
           }
+          $('#load-more-container').addClass('hidden');
           return;
         }
 
@@ -312,10 +422,21 @@ function get_posts(username) {
           }
           $('#post-box').append(html_temp);
         }
+
+        if (window.feedHasMore) {
+          $('#load-more-container').removeClass('hidden');
+          $('#load-more-btn').prop('disabled', false).html('Load More');
+        } else {
+          $('#load-more-container').addClass('hidden');
+        }
       }
     },
     error: function (xhr) {
       handle_ajax_error(xhr, 'Gagal memuat postingan.');
+    },
+    complete: function () {
+      window.feedLoading = false;
+      $('#feed-loading').addClass('hidden');
     }
   });
 }
