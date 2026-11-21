@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Bookmarks | Sweeter</title>
+
+  <!-- Google Fonts: Manrope -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+
+  <!-- Google Material Symbols Outlined -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"/>
+
+  <!-- Font Awesome 4.7.0 -->
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css"/>
+
+  <!-- jQuery 3.4.1 -->
+  <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Tailwind Custom Design Tokens (Stitch Warm Editorial Palette) -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            "surface-container-highest": "#e3e2e0", "surface-dim": "#dbdad8",
+            "background": "#faf9f7", "surface-container-high": "#e9e8e6",
+            "on-primary": "#ffffff", "on-secondary-fixed-variant": "#4e4542",
+            "on-primary-fixed": "#321112", "primary-fixed": "#ffdad9",
+            "on-surface-variant": "#514443", "on-error-container": "#93000a",
+            "on-tertiary-fixed": "#2f1314", "inverse-on-surface": "#f1f1ef",
+            "secondary-container": "#ecdcd8", "error": "#ba1a1a",
+            "tertiary-fixed": "#ffdad9", "outline": "#837373",
+            "on-secondary-fixed": "#211a18", "surface-tint": "#805252",
+            "inverse-primary": "#f3b8b7", "primary-fixed-dim": "#f3b8b7",
+            "on-background": "#1a1c1b", "inverse-surface": "#2f3130",
+            "on-tertiary-fixed-variant": "#613d3d", "secondary-fixed": "#eedfdb",
+            "on-error": "#ffffff", "surface-container-lowest": "#ffffff",
+            "on-tertiary": "#ffffff", "on-tertiary-container": "#c99a99",
+            "primary-container": "#583030", "surface": "#faf9f7",
+            "surface-container": "#efeeec", "tertiary-container": "#543232",
+            "surface-container-low": "#f4f3f1", "secondary": "#675c59",
+            "on-surface": "#1a1c1b", "tertiary-fixed-dim": "#ecbab9",
+            "on-secondary-container": "#6b605d", "secondary-fixed-dim": "#d2c3c0",
+            "surface-variant": "#e3e2e0", "surface-bright": "#faf9f7",
+            "on-primary-fixed-variant": "#653b3b", "primary": "#3e1b1b",
+            "error-container": "#ffdad6", "on-secondary": "#ffffff",
+            "outline-variant": "#d5c2c1", "on-primary-container": "#cf9897",
+            "tertiary": "#3b1d1d"
+          },
+          borderRadius: { DEFAULT: "0.25rem", lg: "0.5rem", xl: "0.75rem", full: "9999px" },
+          spacing: {
+            "gutter-desktop": "2rem", "space-md": "1rem", "margin-desktop": "2.5rem",
+            "margin-tablet": "1.5rem", "margin": "1rem", "space-xs": "0.25rem",
+            "gutter": "1.25rem", "space-2xl": "3rem", "space-xl": "2rem",
+            "space-lg": "1.5rem", "space-sm": "0.5rem"
+          },
+          fontFamily: {
+            "body-md": ["Manrope"], "headline-xl-mobile": ["Manrope"],
+            "headline-lg": ["Manrope"], "body-sm": ["Manrope"],
+            "label-md": ["Manrope"], "headline-xl": ["Manrope"],
+            "headline-sm": ["Manrope"], "body-lg": ["Manrope"],
+            "caption": ["Manrope"], "label-sm": ["Manrope"]
+          },
+          fontSize: {
+            "body-md": ["0.9375rem", { lineHeight: "1.5rem", letterSpacing: "-0.005em", fontWeight: "400" }],
+            "headline-xl-mobile": ["1.75rem", { lineHeight: "2.25rem", letterSpacing: "-0.02em", fontWeight: "700" }],
+            "headline-lg": ["1.5rem", { lineHeight: "2rem", letterSpacing: "-0.02em", fontWeight: "600" }],
+            "body-sm": ["0.875rem", { lineHeight: "1.375rem", letterSpacing: "0em", fontWeight: "400" }],
+            "label-md": ["0.875rem", { lineHeight: "1.25rem", letterSpacing: "0em", fontWeight: "600" }],
+            "headline-xl": ["2.25rem", { lineHeight: "2.75rem", letterSpacing: "-0.025em", fontWeight: "700" }],
+            "headline-sm": ["1.25rem", { lineHeight: "1.75rem", letterSpacing: "-0.015em", fontWeight: "600" }],
+            "body-lg": ["1.0625rem", { lineHeight: "1.65rem", letterSpacing: "-0.01em", fontWeight: "400" }],
+            "caption": ["0.6875rem", { lineHeight: "0.875rem", letterSpacing: "0.03em", fontWeight: "500" }],
+            "label-sm": ["0.75rem", { lineHeight: "1rem", letterSpacing: "0.02em", fontWeight: "500" }]
+          }
+        }
+      }
+    };
+  </script>
+</head>
+
+<body class="bg-background font-body-md text-body-md text-on-surface antialiased">
+
+<!-- ===== HEADER / TOP NAVBAR ===== -->
+<header class="fixed top-0 left-0 right-0 z-40 bg-surface/80 backdrop-blur-xl shadow-[0_1px_8px_rgba(88,48,48,0.04)]">
+  <div class="h-16 max-w-7xl mx-auto px-4 md:px-margin-desktop flex items-center justify-between">
+    <!-- Brand -->
+    <div class="flex items-center gap-space-sm">
+      <a href="/" class="font-headline-sm text-headline-sm text-primary font-bold tracking-tight no-underline">Sweeter</a>
+    </div>
+    <!-- Center nav -->
+    <nav class="hidden lg:flex items-center gap-space-md">
+      <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full no-underline" href="/">Timeline</a>
+      <a aria-current="page" class="px-space-md py-space-xs transition-colors bg-secondary-container text-on-secondary-container font-semibold rounded-full no-underline" href="/bookmarks">Bookmarks</a>
+    </nav>
+    <!-- Right: User info + Sign Out -->
+    <div class="flex items-center gap-space-md">
+      <div class="flex items-center gap-space-sm">
+        <span class="font-label-md text-label-md text-on-surface hidden sm:inline-block">{{ (current_user.profile_name if current_user else user_info.profile_name) | e }}</span>
+        <a href="/user/{{ (current_user.username if current_user else user_info.username) | e }}">
+          <img alt="Profile"
+               class="w-8 h-8 rounded-full object-cover cursor-pointer"
+               src="/static/{{ (current_user.profile_pic_real if current_user else user_info.profile_pic_real) | e }}"
+               onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+        </a>
+      </div>
+      <form action="/sign_out" method="post" class="inline m-0">
+        <button type="submit"
+                class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full hover:bg-surface-container border-0 bg-transparent cursor-pointer">
+          Sign Out
+        </button>
+      </form>
+    </div>
+  </div>
+</header>
+
+<div class="max-w-7xl mx-auto px-4 md:px-margin-desktop">
+
+  <!-- ===== LEFT SIDEBAR ===== -->
+  <aside class="hidden md:flex fixed top-16 left-[max(1rem,calc((100vw-80rem)/2+2.5rem))] h-[calc(100vh-4rem)] w-[240px] z-30 flex-col justify-between py-space-lg pr-space-md bg-transparent">
+    <div class="flex flex-col gap-space-lg">
+      <nav class="flex flex-col gap-space-xs">
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/">
+          <span class="material-symbols-outlined text-[22px]">home</span>
+          <span class="font-label-md text-label-md">Home</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/user/{{ (current_user.username if current_user else user_info.username) | e }}">
+          <span class="material-symbols-outlined text-[22px]">person</span>
+          <span class="font-label-md text-label-md">Profile</span>
+        </a>
+        <a aria-current="page" class="flex items-center gap-space-md px-space-md py-space-sm rounded-full transition-all bg-secondary-container text-on-secondary-container font-semibold no-underline" href="/bookmarks">
+          <span class="material-symbols-outlined text-[22px]">bookmark</span>
+          <span class="font-label-md text-label-md">Bookmarks</span>
+        </a>
+      </nav>
+      <a href="/" class="w-full flex items-center justify-center gap-space-xs py-space-sm px-space-lg bg-primary-container text-on-primary rounded-full font-label-md text-label-md hover:bg-primary transition-all shadow-[0_4px_16px_-2px_rgba(88,48,48,0.2)] no-underline">
+        <span class="material-symbols-outlined text-[20px]">edit_note</span>
+        <span>Create Post</span>
+      </a>
+    </div>
+    <!-- Bottom user identity card -->
+    <a href="/user/{{ (current_user.username if current_user else user_info.username) | e }}"
+       class="flex items-center justify-between p-space-sm rounded-xl bg-surface-container-low hover:bg-surface-container transition-colors cursor-pointer no-underline">
+      <div class="flex items-center gap-space-sm min-w-0">
+        <img alt="Profile"
+             class="w-10 h-10 rounded-full object-cover flex-shrink-0"
+             src="/static/{{ (current_user.profile_pic_real if current_user else user_info.profile_pic_real) | e }}"
+             onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+        <div class="flex flex-col min-w-0">
+          <span class="font-label-md text-label-md text-on-surface truncate">{{ (current_user.profile_name if current_user else user_info.profile_name) | e }}</span>
+          <span class="font-caption text-caption text-on-surface-variant truncate">@{{ (current_user.username if current_user else user_info.username) | e }}</span>
+        </div>
+      </div>
+      <span class="material-symbols-outlined text-on-surface-variant text-[20px]">more_horiz</span>
+    </a>
+  </aside>
+
+  <!-- ===== MAIN CONTENT COLUMN ===== -->
+  <div class="pl-0 md:pl-[264px] pr-0 xl:pr-[344px] min-h-screen">
+    <main class="relative pt-16 bg-transparent max-w-[620px] mx-auto min-h-screen py-space-lg">
+      <div class="flex flex-col w-full">
+
+        <!-- Sticky Bookmarks Header -->
+        <section class="sticky top-16 z-20 backdrop-blur-md bg-surface/90 px-space-md py-space-sm mb-space-md border-b border-surface-container/60">
+          <div class="flex items-center justify-between">
+            <div>
+              <h1 class="font-headline-sm text-headline-sm font-bold text-primary">Bookmarks</h1>
+              <p class="font-caption text-caption text-on-surface-variant">Postingan yang Anda simpan untuk dibaca kembali</p>
+            </div>
+            <div class="text-on-surface-variant font-label-sm text-label-sm">
+              <span id="bookmark-count-display">{{ bookmark_count }}</span> tersimpan
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== DYNAMIC BOOKMARKS STREAM ===== -->
+        <div id="post-box" class="flex flex-col gap-space-md">
+          <div class="text-center text-on-surface-variant py-8 font-body-sm">
+            <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat postingan tersimpan…
+          </div>
+        </div>
+
+        <!-- Feed loading spinner for pagination -->
+        <div id="feed-loading" class="hidden text-center py-6 text-on-surface-variant font-body-sm">
+          <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat postingan berikutnya...
+        </div>
+
+        <!-- Load More Container -->
+        <div id="load-more-container" class="hidden text-center py-6">
+          <button id="load-more-btn"
+                  onclick="load_more_posts()"
+                  class="px-6 py-2.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md text-label-md transition-all duration-150 shadow-sm border border-outline-variant cursor-pointer">
+            Load More
+          </button>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- ===== RIGHT SIDEBAR ===== -->
+  <aside class="hidden xl:flex flex-col fixed top-16 right-[max(1rem,calc((100vw-80rem)/2+2.5rem))] h-[calc(100vh-4rem)] w-[320px] z-30 py-space-lg pl-space-md overflow-y-auto">
+    <div class="flex flex-col gap-space-lg">
+      <div class="p-space-lg bg-surface-container-lowest rounded-xl shadow-[0_4px_16px_-2px_rgba(88,48,48,0.03)]">
+        <h3 class="font-headline-sm text-headline-sm text-on-surface mb-space-md">Saved Posts</h3>
+        <p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+          Bookmark bersifat privat. Hanya Anda yang dapat melihat postingan yang Anda simpan di halaman ini.
+        </p>
+      </div>
+      <footer class="px-space-sm font-caption text-caption text-on-surface-variant flex flex-wrap gap-x-space-md gap-y-space-xs leading-relaxed">
+        <span>© 2025 Sweeter</span>
+      </footer>
+    </div>
+  </aside>
+
+</div>
+
+<!-- ===== SWEETER DYNAMIC JS ===== -->
+<script src="{{ url_for('static', filename='myjs.js') }}"></script>
+
+<script>
+  $(document).ready(function () {
+    window.isBookmarksPage = true;
+    load_bookmarks('', false);
+
+    // Infinite scroll
+    $(window).on('scroll', function () {
+      if ($(window).scrollTop() + $(window).height() >= $(document).height() - 250) {
+        if (window.bookmarksHasMore && !window.bookmarksLoading && window.bookmarksNextCursor) {
+          load_more_posts();
+        }
+      }
+    });
+  });
+</script>
+
+</body>
+</html>

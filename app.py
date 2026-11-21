@@ -363,6 +363,92 @@ def posting():
         return redirect(url_for('home'))    
     
     
+def enrich_posts_metadata(posts, current_username):
+    """
+    Memperkaya daftar dokumen post dengan:
+    1. Batch comments count
+    2. Batch reactions count (heart, stars, thumbs)
+    3. Status reaksi pengguna saat ini (heart_by_me, stars_by_me, thumbs_by_me)
+    4. Status bookmark pengguna saat ini (is_bookmarked)
+    5. Hak akses kepemilikan postingan (is_mine)
+    6. Indikator editan postingan (is_edited)
+    """
+    post_ids = [str(post['_id']) for post in posts]
+    comment_counts = {}
+    heart_counts = {}
+    stars_counts = {}
+    thumbs_counts = {}
+    my_hearts = set()
+    my_stars = set()
+    my_thumbs = set()
+    my_bookmarks = set()
+
+    if post_ids:
+        # Batch count komentar
+        pipeline_comments = [
+            {'$match': {'post_id': {'$in': post_ids}}},
+            {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
+        ]
+        for item in db.comments.aggregate(pipeline_comments):
+            comment_counts[item['_id']] = item['count']
+
+        # Batch count reactions
+        for item in db.likes.aggregate([
+            {'$match': {'post_id': {'$in': post_ids}, 'type': 'heart'}},
+            {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
+        ]):
+            heart_counts[item['_id']] = item['count']
+
+        for item in db.stars.aggregate([
+            {'$match': {'post_id': {'$in': post_ids}, 'type': 'stars'}},
+            {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
+        ]):
+            stars_counts[item['_id']] = item['count']
+
+        for item in db.thumbs.aggregate([
+            {'$match': {'post_id': {'$in': post_ids}, 'type': 'thumbs'}},
+            {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
+        ]):
+            thumbs_counts[item['_id']] = item['count']
+
+        if current_username:
+            my_hearts = set(db.likes.distinct('post_id', {
+                'post_id': {'$in': post_ids},
+                'type': 'heart',
+                'username': current_username
+            }))
+            my_stars = set(db.stars.distinct('post_id', {
+                'post_id': {'$in': post_ids},
+                'type': 'stars',
+                'username': current_username
+            }))
+            my_thumbs = set(db.thumbs.distinct('post_id', {
+                'post_id': {'$in': post_ids},
+                'type': 'thumbs',
+                'username': current_username
+            }))
+            my_bookmarks = set(db.bookmarks.distinct('post_id', {
+                'post_id': {'$in': post_ids},
+                'username': current_username
+            }))
+
+    for post in posts:
+        pid = str(post['_id'])
+        post['_id'] = pid
+        post['count_heart'] = heart_counts.get(pid, 0)
+        post['heart_by_me'] = pid in my_hearts
+        post['count_stars'] = stars_counts.get(pid, 0)
+        post['stars_by_me'] = pid in my_stars
+        post['count_thumbs'] = thumbs_counts.get(pid, 0)
+        post['thumbs_by_me'] = pid in my_thumbs
+        post['count_comments'] = comment_counts.get(pid, 0)
+        post['is_bookmarked'] = pid in my_bookmarks
+        post['is_mine'] = (post.get('username') == current_username)
+        post['is_edited'] = bool(post.get('is_edited', False))
+
+    return posts
+
+
 @app.route('/get_posts', methods=['GET'])
 def get_posts():
     """
@@ -443,76 +529,8 @@ def get_posts():
     # 4. Eksekusi query dengan pengurutan kronologis terbaru (Newest First)
     posts = list(db.posts.find(query).sort([('date', -1), ('_id', -1)]).limit(limit))
 
-    # 5. Batch Aggregation untuk komentar dan reaksi (Menghilangkan N+1 Query Storm)
-    post_ids = [str(post['_id']) for post in posts]
-    comment_counts = {}
-    heart_counts = {}
-    stars_counts = {}
-    thumbs_counts = {}
-    my_hearts = set()
-    my_stars = set()
-    my_thumbs = set()
-
-    if post_ids:
-        # Batch count komentar
-        pipeline_comments = [
-            {'$match': {'post_id': {'$in': post_ids}}},
-            {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
-        ]
-        for item in db.comments.aggregate(pipeline_comments):
-            comment_counts[item['_id']] = item['count']
-
-        # Batch count hearts
-        pipeline_hearts = [
-            {'$match': {'post_id': {'$in': post_ids}, 'type': 'heart'}},
-            {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
-        ]
-        for item in db.likes.aggregate(pipeline_hearts):
-            heart_counts[item['_id']] = item['count']
-
-        # Batch count stars
-        pipeline_stars = [
-            {'$match': {'post_id': {'$in': post_ids}, 'type': 'stars'}},
-            {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
-        ]
-        for item in db.stars.aggregate(pipeline_stars):
-            stars_counts[item['_id']] = item['count']
-
-        # Batch count thumbs
-        pipeline_thumbs = [
-            {'$match': {'post_id': {'$in': post_ids}, 'type': 'thumbs'}},
-            {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
-        ]
-        for item in db.thumbs.aggregate(pipeline_thumbs):
-            thumbs_counts[item['_id']] = item['count']
-
-        # Status reaksi pengguna saat ini dalam satu query distinct per tipe
-        my_hearts = set(db.likes.distinct('post_id', {
-            'post_id': {'$in': post_ids},
-            'type': 'heart',
-            'username': current_username
-        }))
-        my_stars = set(db.stars.distinct('post_id', {
-            'post_id': {'$in': post_ids},
-            'type': 'stars',
-            'username': current_username
-        }))
-        my_thumbs = set(db.thumbs.distinct('post_id', {
-            'post_id': {'$in': post_ids},
-            'type': 'thumbs',
-            'username': current_username
-        }))
-
-    for post in posts:
-        pid = str(post['_id'])
-        post['_id'] = pid
-        post['count_heart'] = heart_counts.get(pid, 0)
-        post['heart_by_me'] = pid in my_hearts
-        post['count_stars'] = stars_counts.get(pid, 0)
-        post['stars_by_me'] = pid in my_stars
-        post['count_thumbs'] = thumbs_counts.get(pid, 0)
-        post['thumbs_by_me'] = pid in my_thumbs
-        post['count_comments'] = comment_counts.get(pid, 0)
+    # 5. Memperkaya metadata postingan tanpa N+1 query loop
+    posts = enrich_posts_metadata(posts, current_username)
 
     has_more = (len(posts) == limit)
     next_cursor = str(posts[-1]['_id']) if has_more else None
@@ -1183,6 +1201,347 @@ def user_following_page(username):
         )
     except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))  
+
+
+# ==========================================
+# BOOKMARKS & POST MANAGEMENT (SWEETER V2)
+# ==========================================
+
+def _extract_post_id(param_post_id=None):
+    """Mengekstrak post_id dari URL parameter, form-data, atau JSON body."""
+    if param_post_id and isinstance(param_post_id, str) and param_post_id.strip():
+        return param_post_id.strip()
+
+    if request.is_json:
+        json_data = request.get_json(silent=True) or {}
+        val = json_data.get('post_id') or json_data.get('post_id_give')
+        if val and isinstance(val, str) and val.strip():
+            return val.strip()
+
+    form_val = request.form.get('post_id_give') or request.form.get('post_id')
+    if form_val and isinstance(form_val, str) and form_val.strip():
+        return form_val.strip()
+
+    arg_val = request.args.get('post_id') or request.args.get('post_id_give')
+    if arg_val and isinstance(arg_val, str) and arg_val.strip():
+        return arg_val.strip()
+
+    return None
+
+
+@app.route('/api/bookmark', methods=['POST'])
+@app.route('/api/posts/<post_id>/bookmark', methods=['POST'])
+def bookmark_post(post_id=None):
+    """
+    Endpoint untuk menyimpan (bookmark) suatu postingan.
+    Mencegah duplikasi bookmark secara race-safe melalui compound unique index.
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    target_pid = _extract_post_id(post_id)
+    if not target_pid:
+        return jsonify({'result': 'fail', 'msg': 'Post ID is required'}), 400
+
+    if not ObjectId.is_valid(target_pid):
+        return jsonify({'result': 'fail', 'msg': 'Invalid post ID format'}), 400
+
+    # Pastikan postingan ada di db.posts
+    post_doc = db.posts.find_one({'_id': ObjectId(target_pid)})
+    if not post_doc:
+        return jsonify({'result': 'fail', 'msg': 'Post not found'}), 404
+
+    # Cegah duplikasi bookmark
+    existing = db.bookmarks.find_one({'username': current_username, 'post_id': target_pid})
+    if existing:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Post already bookmarked',
+            'is_bookmarked': True,
+            'post_id': target_pid
+        }), 409
+
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        db.bookmarks.insert_one({
+            'username': current_username,
+            'post_id': target_pid,
+            'created_at': now
+        })
+    except DuplicateKeyError:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Post already bookmarked',
+            'is_bookmarked': True,
+            'post_id': target_pid
+        }), 409
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Post bookmarked successfully',
+        'is_bookmarked': True,
+        'post_id': target_pid
+    }), 200
+
+
+@app.route('/api/unbookmark', methods=['POST'])
+@app.route('/api/posts/<post_id>/unbookmark', methods=['POST'])
+def unbookmark_post(post_id=None):
+    """
+    Endpoint untuk menghapus bookmark postingan.
+    Idempotent dan aman meskipun bookmark belum pernah disimpan.
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    target_pid = _extract_post_id(post_id)
+    if not target_pid:
+        return jsonify({'result': 'fail', 'msg': 'Post ID is required'}), 400
+
+    if not ObjectId.is_valid(target_pid):
+        return jsonify({'result': 'fail', 'msg': 'Invalid post ID format'}), 400
+
+    db.bookmarks.delete_one({'username': current_username, 'post_id': target_pid})
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Bookmark removed successfully',
+        'is_bookmarked': False,
+        'post_id': target_pid
+    }), 200
+
+
+@app.route('/api/bookmarks', methods=['GET'])
+def get_bookmarks_api():
+    """
+    Mengambil daftar postingan yang di-bookmark oleh pengguna saat ini (Private).
+    Mendukung keyset cursor pagination dan menangani postingan yang telah dihapus.
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    cursor = request.args.get('cursor', '').strip()
+    limit_raw = request.args.get('limit', '20').strip()
+
+    try:
+        limit = int(limit_raw)
+        if limit <= 0 or limit > 50:
+            limit = 20
+    except ValueError:
+        return jsonify({'result': 'fail', 'msg': 'Invalid limit parameter'}), 400
+
+    b_query = {'username': current_username}
+    if cursor:
+        if ObjectId.is_valid(cursor):
+            anchor = db.bookmarks.find_one({'_id': ObjectId(cursor)})
+            if anchor:
+                c_date = anchor.get('created_at', '')
+                c_id = anchor['_id']
+                b_query['$or'] = [
+                    {'created_at': {'$lt': c_date}},
+                    {'created_at': c_date, '_id': {'$lt': c_id}}
+                ]
+            else:
+                return jsonify({'result': 'fail', 'msg': 'Cursor not found'}), 404
+        elif cursor.count('-') >= 2 or cursor.count('.') >= 2:
+            b_query['created_at'] = {'$lt': cursor}
+        else:
+            return jsonify({'result': 'fail', 'msg': 'Invalid cursor parameter'}), 400
+
+    bookmark_docs = list(db.bookmarks.find(b_query).sort([('created_at', -1), ('_id', -1)]).limit(limit))
+
+    # Ambil postingan terkait dari db.posts
+    post_ids = [b['post_id'] for b in bookmark_docs if ObjectId.is_valid(b.get('post_id', ''))]
+    post_obj_ids = [ObjectId(pid) for pid in post_ids]
+    posts_map = {str(p['_id']): p for p in db.posts.find({'_id': {'$in': post_obj_ids}})}
+
+    valid_posts = []
+    stale_bookmark_ids = []
+    for b in bookmark_docs:
+        pid = b['post_id']
+        if pid in posts_map:
+            valid_posts.append(posts_map[pid])
+        else:
+            # Postingan telah dihapus: tandai stale bookmark untuk dibersihkan
+            stale_bookmark_ids.append(b['_id'])
+
+    # Pembersihan bookmark yang usang (postingan sudah tidak ada)
+    if stale_bookmark_ids:
+        db.bookmarks.delete_many({'_id': {'$in': stale_bookmark_ids}})
+
+    # Perkaya postingan dengan metadata komentar, reaksi, kepemilikan, dan bookmark
+    valid_posts = enrich_posts_metadata(valid_posts, current_username)
+
+    has_more = (len(bookmark_docs) == limit)
+    next_cursor = str(bookmark_docs[-1]['_id']) if has_more else None
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Successfully fetched bookmarked posts',
+        'posts': valid_posts,
+        'next_cursor': next_cursor,
+        'has_more': has_more
+    }), 200
+
+
+@app.route('/bookmarks', methods=['GET'])
+def bookmarks_page():
+    """Halaman web daftar postingan tersimpan (Bookmarks)."""
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return redirect(url_for('login'))
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+        user_info = db.users.find_one({'username': current_username}, {'_id': False})
+        if not user_info:
+            return redirect(url_for('login'))
+
+        bookmark_count = db.bookmarks.count_documents({'username': current_username})
+        return render_template(
+            'bookmarks.html',
+            user_info=user_info,
+            current_user=user_info,
+            bookmark_count=bookmark_count
+        )
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return redirect(url_for('login'))
+
+
+@app.route('/api/posts/<post_id>/edit', methods=['POST'])
+@app.route('/edit_post', methods=['POST'])
+def edit_post(post_id=None):
+    """
+    Endpoint pengeditan isi postingan milik pengguna sendiri.
+    Memeriksa hak kepemilikan (403 jika bukan pemilik) dan validasi konten.
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    target_pid = _extract_post_id(post_id)
+    if not target_pid:
+        return jsonify({'result': 'fail', 'msg': 'Post ID is required'}), 400
+
+    if not ObjectId.is_valid(target_pid):
+        return jsonify({'result': 'fail', 'msg': 'Invalid post ID format'}), 400
+
+    post_doc = db.posts.find_one({'_id': ObjectId(target_pid)})
+    if not post_doc:
+        return jsonify({'result': 'fail', 'msg': 'Post not found'}), 404
+
+    # Otorisasi kepemilikan postingan
+    if post_doc.get('username') != current_username:
+        return jsonify({'result': 'fail', 'msg': 'You do not have permission to edit this post'}), 403
+
+    # Validasi konten baru
+    new_content = None
+    if request.is_json:
+        new_content = (request.get_json(silent=True) or {}).get('comment')
+    if not new_content:
+        new_content = request.form.get('comment_give') or request.form.get('comment')
+
+    if not new_content or not isinstance(new_content, str) or not new_content.strip():
+        return jsonify({'result': 'fail', 'msg': 'Post content cannot be empty'}), 400
+
+    new_content = new_content.strip()
+    if len(new_content) > 5000:
+        return jsonify({'result': 'fail', 'msg': 'Post content exceeds maximum length'}), 400
+
+    now = datetime.now(timezone.utc).isoformat()
+    db.posts.update_one(
+        {'_id': ObjectId(target_pid)},
+        {'$set': {
+            'comment': new_content,
+            'is_edited': True,
+            'updated_at': now
+        }}
+    )
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Post updated successfully',
+        'post_id': target_pid,
+        'comment': new_content,
+        'is_edited': True
+    }), 200
+
+
+@app.route('/api/posts/<post_id>/delete', methods=['POST'])
+@app.route('/delete_post', methods=['POST'])
+def delete_post_endpoint(post_id=None):
+    """
+    Endpoint penghapusan postingan milik pengguna sendiri.
+    Menghapus dokumen post dan membersihkan data referensi terkait (bookmarks, reactions, comments).
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    target_pid = _extract_post_id(post_id)
+    if not target_pid:
+        return jsonify({'result': 'fail', 'msg': 'Post ID is required'}), 400
+
+    if not ObjectId.is_valid(target_pid):
+        return jsonify({'result': 'fail', 'msg': 'Invalid post ID format'}), 400
+
+    post_doc = db.posts.find_one({'_id': ObjectId(target_pid)})
+    if not post_doc:
+        return jsonify({'result': 'fail', 'msg': 'Post not found'}), 404
+
+    # Otorisasi kepemilikan postingan
+    if post_doc.get('username') != current_username:
+        return jsonify({'result': 'fail', 'msg': 'You do not have permission to delete this post'}), 403
+
+    # Hapus dokumen post dari database
+    db.posts.delete_one({'_id': ObjectId(target_pid)})
+
+    # Bersihkan relasi dan dependensi postingan
+    db.bookmarks.delete_many({'post_id': target_pid})
+    db.likes.delete_many({'post_id': target_pid})
+    db.stars.delete_many({'post_id': target_pid})
+    db.thumbs.delete_many({'post_id': target_pid})
+    db.comments.delete_many({'post_id': target_pid})
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Post deleted successfully',
+        'post_id': target_pid
+    }), 200  
 
 if __name__ == "__main__":
     app.run('0.0.0.0', port=5000, debug=True)

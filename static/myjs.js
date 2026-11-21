@@ -142,8 +142,240 @@ function switch_feed_tab(targetTab) {
 }
 
 function load_more_posts() {
+  if (window.isBookmarksPage) {
+    if (window.bookmarksLoading || !window.bookmarksHasMore || !window.bookmarksNextCursor) return;
+    load_bookmarks(window.bookmarksNextCursor, true);
+    return;
+  }
   if (window.feedLoading || !window.feedHasMore || !window.feedNextCursor) return;
   get_posts(window.currentProfileUsername || '', window.currentFeedTab || 'following', window.feedNextCursor, true);
+}
+
+// --- Post Card Renderer (Stitch & Bulma) ---
+
+function render_post_card(post, isStitch) {
+  let time_post = new Date(post['date']);
+  let time_before = time2str(time_post);
+  let class_heart = post['heart_by_me'] ? 'fa-heart' : 'fa-heart-o';
+  let class_stars = post['stars_by_me'] ? 'fa-star' : 'fa-star-o';
+  let class_thumbs = post['thumbs_by_me'] ? 'fa-thumbs-up' : 'fa-thumbs-o-up';
+
+  let count_comments = (post['count_comments'] !== undefined && post['count_comments'] !== null)
+    ? post['count_comments']
+    : 0;
+  let display_comment_num = count_comments > 0 ? num2str(count_comments) : '0';
+
+  let avatar_url = sanitizeAvatarUrl(post['profile_pic_real']);
+  let profile_name_escaped = escapeHtml(post['profile_name']);
+  let username_escaped = escapeHtml(post['username']);
+  let comment_escaped = escapeHtml(post['comment']);
+
+  let is_edited = Boolean(post['is_edited']);
+  let is_mine = Boolean(post['is_mine']);
+  let is_bookmarked = Boolean(post['is_bookmarked']);
+
+  if (isStitch) {
+    let edited_badge = is_edited
+      ? `<span class="text-on-surface-variant font-caption text-caption italic ml-1 post-edited-indicator" id="edited-badge-${post['_id']}">· edited</span>`
+      : `<span class="text-on-surface-variant font-caption text-caption italic ml-1 post-edited-indicator hidden" id="edited-badge-${post['_id']}">· edited</span>`;
+
+    let owner_actions = is_mine
+      ? `
+      <div class="flex items-center gap-space-xs text-on-surface-variant">
+        <button type="button" onclick="open_edit_post('${post['_id']}')" class="p-1 rounded-full hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface border-0 bg-transparent cursor-pointer" title="Edit Post">
+          <span class="material-symbols-outlined text-[18px]">edit</span>
+        </button>
+        <button type="button" onclick="delete_post('${post['_id']}')" class="p-1 rounded-full hover:bg-error-container hover:text-error transition-colors text-on-surface-variant border-0 bg-transparent cursor-pointer" title="Hapus Post">
+          <span class="material-symbols-outlined text-[18px]">delete</span>
+        </button>
+      </div>`
+      : '';
+
+    return `
+    <article class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm transition-all hover:shadow-md mb-space-md" id="${post['_id']}">
+      <!-- Post Header -->
+      <div class="flex items-center justify-between mb-space-sm">
+        <div class="flex items-center gap-space-sm min-w-0">
+          <a href="/user/${encodeURIComponent(post['username'])}" class="shrink-0">
+            <img class="w-10 h-10 rounded-full object-cover shrink-0" src="${avatar_url}" alt="${profile_name_escaped}" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+          </a>
+          <div class="flex flex-col min-w-0">
+            <div class="flex items-center gap-space-xs">
+              <a href="/user/${encodeURIComponent(post['username'])}" class="font-label-md text-label-md text-on-surface font-semibold truncate hover:underline no-underline text-inherit">${profile_name_escaped}</a>
+            </div>
+            <div class="flex items-center gap-space-xs text-on-surface-variant font-caption text-caption">
+              <span>@${username_escaped}</span>
+              <span>·</span>
+              <span>${time_before}</span>
+              ${edited_badge}
+            </div>
+          </div>
+        </div>
+        ${owner_actions}
+      </div>
+
+      <!-- Post Body -->
+      <p class="font-body-md text-body-md text-on-surface mb-space-md leading-relaxed whitespace-pre-wrap" id="post-text-${post['_id']}">
+        ${comment_escaped}
+      </p>
+
+      <!-- Inline Edit Box -->
+      <div id="edit-box-${post['_id']}" class="hidden mb-space-md bg-surface-container-low p-space-sm rounded-lg">
+        <textarea id="edit-textarea-${post['_id']}" class="w-full bg-surface-container-lowest rounded-lg p-space-sm font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary-container resize-none transition-all" rows="3" maxlength="5000">${comment_escaped}</textarea>
+        <div class="flex items-center justify-end gap-space-xs mt-space-xs">
+          <button type="button" onclick="cancel_edit_post('${post['_id']}')" class="px-space-sm py-1 font-label-sm text-label-sm text-on-surface-variant hover:bg-surface-container-high rounded-full border-0 bg-transparent cursor-pointer">Batal</button>
+          <button type="button" onclick="submit_edit_post('${post['_id']}')" class="px-space-md py-1 bg-primary-container text-on-primary font-label-sm text-label-sm rounded-full hover:bg-primary transition-colors border-0 cursor-pointer btn-save-edit">Simpan</button>
+        </div>
+      </div>
+
+      <!-- Action Counter Toolbar -->
+      <div class="flex items-center justify-between text-on-surface-variant font-label-sm text-label-sm mb-space-md pt-space-xs">
+        <div class="flex items-center gap-space-md">
+          <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${post['heart_by_me'] ? 'text-primary font-bold' : ''}" aria-label="heart" onclick="toggle_like('${post['_id']}', 'heart')">
+            <span class="icon is-small">
+              <i class="fa ${class_heart}" aria-hidden="true"></i>
+            </span>&nbsp;<span class="like-num">${post['count_heart']}</span>
+          </a>
+          <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${post['stars_by_me'] ? 'text-primary font-bold' : ''}" aria-label="stars" onclick="toggle_stars('${post['_id']}', 'stars')">
+            <span class="icon is-small">
+              <i class="fa ${class_stars}" aria-hidden="true"></i>
+            </span>&nbsp;<span class="star-num">${num2str(post['count_stars'])}</span>
+          </a>
+          <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${post['thumbs_by_me'] ? 'text-primary font-bold' : ''}" aria-label="thumbs" onclick="toggle_thumbs('${post['_id']}', 'thumbs')">
+            <span class="icon is-small">
+              <i class="fa ${class_thumbs}" aria-hidden="true"></i>
+            </span>&nbsp;<span class="thumbs-num">${num2str(post['count_thumbs'])}</span>
+          </a>
+          <a class="flex items-center gap-1 text-primary-container font-semibold btn-toggle-comment cursor-pointer text-inherit no-underline" aria-label="comment" onclick="toggle_comments('${post['_id']}')" title="Komentar">
+            <span class="icon is-small">
+              <i class="fa fa-comment-o" aria-hidden="true"></i>
+            </span>&nbsp;<span class="comment-num" data-count="${count_comments}">${display_comment_num}</span>
+          </a>
+        </div>
+        <!-- Bookmark Button -->
+        <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline btn-bookmark ${is_bookmarked ? 'text-primary font-bold' : ''}" aria-label="bookmark" onclick="toggle_bookmark('${post['_id']}')" title="Bookmark">
+          <span class="icon is-small">
+            <i class="fa ${is_bookmarked ? 'fa-bookmark text-primary' : 'fa-bookmark-o'}" id="bookmark-icon-${post['_id']}" aria-hidden="true"></i>
+          </span>
+        </a>
+      </div>
+
+      <!-- Container Komentar (Collapsible) -->
+      <div class="comment-section is-hidden bg-surface-container-low rounded-lg p-space-md mt-space-sm" id="comments-section-${post['_id']}">
+        <!-- Form Input Komentar Utama -->
+        <div class="comment-form mb-3">
+          <div class="flex items-center gap-space-sm">
+            <div class="flex-1 relative flex items-center">
+              <input class="w-full bg-surface-container-lowest rounded-full py-space-xs pl-space-md pr-20 font-body-sm text-body-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary-container comment-input" id="input-comment-${post['_id']}" type="text" placeholder="Tulis komentar..." maxlength="2000" onkeydown="if(event.key==='Enter'){submit_comment('${post['_id']}');}" />
+              <button class="absolute right-1 px-space-sm py-1 bg-primary-container text-on-primary font-label-sm text-label-sm rounded-full hover:bg-primary transition-colors btn-submit-comment border-0 cursor-pointer" onclick="submit_comment('${post['_id']}')">
+                Reply
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Container List Komentar (Tree) -->
+        <div class="comment-list" id="comments-list-${post['_id']}"></div>
+      </div>
+    </article>
+    `;
+  } else {
+    let edited_badge_bulma = is_edited
+      ? `<small class="has-text-grey-light is-italic ml-1 post-edited-indicator" id="edited-badge-${post['_id']}">· edited</small>`
+      : `<small class="has-text-grey-light is-italic ml-1 post-edited-indicator is-hidden" id="edited-badge-${post['_id']}">· edited</small>`;
+
+    let owner_actions_bulma = is_mine
+      ? `
+      <div class="media-right">
+        <button type="button" class="button is-small is-white" onclick="open_edit_post('${post['_id']}')" title="Edit"><i class="fa fa-pencil"></i></button>
+        <button type="button" class="button is-small is-white has-text-danger" onclick="delete_post('${post['_id']}')" title="Hapus"><i class="fa fa-trash"></i></button>
+      </div>`
+      : '';
+
+    return `
+    <div class="box" id="${post['_id']}">
+      <article class="media">
+        <div class="media-left">
+          <a class="image is-64x64" href="/user/${encodeURIComponent(post['username'])}">
+            <img class="is-rounded" src="${avatar_url}" alt="${profile_name_escaped}"/>
+          </a>
+        </div>
+        <div class="media-content">
+          <div class="content">
+            <p id="post-text-${post['_id']}">
+              <strong>${profile_name_escaped}</strong> <small>@${username_escaped}</small>
+              <small>${time_before}</small>
+              ${edited_badge_bulma}
+              <br/>
+              ${comment_escaped}
+            </p>
+            <div id="edit-box-${post['_id']}" class="is-hidden mb-3">
+              <textarea id="edit-textarea-${post['_id']}" class="textarea is-small" rows="3" maxlength="5000">${comment_escaped}</textarea>
+              <div class="buttons is-right mt-1">
+                <button type="button" class="button is-small is-light" onclick="cancel_edit_post('${post['_id']}')">Batal</button>
+                <button type="button" class="button is-small is-sparta btn-save-edit" onclick="submit_edit_post('${post['_id']}')">Simpan</button>
+              </div>
+            </div>
+          </div>
+          <nav class="level is-mobile mb-2">
+            <div class="level-left"> 
+              <a class="level-item is-sparta" aria-label="heart" onclick="toggle_like('${post['_id']}', 'heart')">
+                <span class="icon is-small">
+                  <i class="fa ${class_heart}" aria-hidden="true"></i>
+                </span>&nbsp;<span class="like-num">${post['count_heart']}</span>
+              </a>
+              <a class="level-item is-sparta" aria-label="stars" onclick="toggle_stars('${post['_id']}', 'stars')">
+                <span class="icon is-small">
+                  <i class="fa ${class_stars}" aria-hidden="true"></i>
+                </span>&nbsp;<span class="star-num">${num2str(post['count_stars'])}</span>
+              </a>
+              <a class="level-item is-sparta" aria-label="thumbs" onclick="toggle_thumbs('${post['_id']}', 'thumbs')">
+                <span class="icon is-small">
+                  <i class="fa ${class_thumbs}" aria-hidden="true"></i>
+                </span>&nbsp;<span class="thumbs-num">${num2str(post['count_thumbs'])}</span>
+              </a>
+              <a class="level-item is-sparta btn-toggle-comment" aria-label="comment" onclick="toggle_comments('${post['_id']}')" title="Komentar">
+                <span class="icon is-small">
+                  <i class="fa fa-comment-o" aria-hidden="true"></i>
+                </span>&nbsp;<span class="comment-num" data-count="${count_comments}">${display_comment_num}</span>
+              </a>
+            </div>
+            <div class="level-right">
+              <a class="level-item is-sparta btn-bookmark ${is_bookmarked ? 'has-text-primary' : ''}" aria-label="bookmark" onclick="toggle_bookmark('${post['_id']}')" title="Bookmark">
+                <span class="icon is-small"><i class="fa ${is_bookmarked ? 'fa-bookmark' : 'fa-bookmark-o'}" id="bookmark-icon-${post['_id']}"></i></span>
+              </a>
+            </div>
+          </nav>
+
+          <!-- Container Komentar (Collapsible) -->
+          <div class="comment-section is-hidden" id="comments-section-${post['_id']}">
+            <hr class="comment-divider"/>
+            
+            <!-- Form Input Komentar Utama -->
+            <div class="comment-form mb-3">
+              <div class="field has-addons">
+                <div class="control is-expanded">
+                  <input class="input is-small is-rounded comment-input" id="input-comment-${post['_id']}" type="text" placeholder="Tulis komentar..." maxlength="2000" onkeydown="if(event.key==='Enter'){submit_comment('${post['_id']}');}" />
+                </div>
+                <div class="control">
+                  <button class="button is-small is-sparta is-rounded btn-submit-comment" onclick="submit_comment('${post['_id']}')">
+                    <span class="icon is-small"><i class="fa fa-paper-plane"></i></span>
+                    <span>Kirim</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Container List Komentar (Tree) -->
+            <div class="comment-list" id="comments-list-${post['_id']}"></div>
+          </div>
+
+        </div>
+        ${owner_actions_bulma}
+      </article>
+    </div>
+    `;
+  }
 }
 
 // --- Pengambilan & Rendering Feed Postingan ---
@@ -259,168 +491,7 @@ function get_posts(username, tab, cursor, append = false) {
         }
 
         for (let i = 0; i < posts.length; i++) {
-          let post = posts[i];
-          let time_post = new Date(post['date']);
-          let time_before = time2str(time_post);
-          let class_heart = post['heart_by_me'] ? 'fa-heart' : 'fa-heart-o';
-          let class_stars = post['stars_by_me'] ? 'fa-star' : 'fa-star-o';
-          let class_thumbs = post['thumbs_by_me'] ? 'fa-thumbs-up' : 'fa-thumbs-o-up';
-
-          let count_comments = (post['count_comments'] !== undefined && post['count_comments'] !== null)
-            ? post['count_comments']
-            : 0;
-          let display_comment_num = count_comments > 0 ? num2str(count_comments) : '0';
-
-          let avatar_url = sanitizeAvatarUrl(post['profile_pic_real']);
-          let profile_name_escaped = escapeHtml(post['profile_name']);
-          let username_escaped = escapeHtml(post['username']);
-          let comment_escaped = escapeHtml(post['comment']);
-
-          let isStitch = $('body').hasClass('bg-background');
-          let html_temp = '';
-
-          if (isStitch) {
-            html_temp = `
-            <article class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm transition-all hover:shadow-md mb-space-md" id="${post['_id']}">
-              <!-- Post Header -->
-              <div class="flex items-center justify-between mb-space-sm">
-                <div class="flex items-center gap-space-sm min-w-0">
-                  <a href="/user/${encodeURIComponent(post['username'])}" class="shrink-0">
-                    <img class="w-10 h-10 rounded-full object-cover shrink-0" src="${avatar_url}" alt="${profile_name_escaped}" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
-                  </a>
-                  <div class="flex flex-col min-w-0">
-                    <div class="flex items-center gap-space-xs">
-                      <a href="/user/${encodeURIComponent(post['username'])}" class="font-label-md text-label-md text-on-surface font-semibold truncate hover:underline no-underline text-inherit">${profile_name_escaped}</a>
-                    </div>
-                    <div class="flex items-center gap-space-xs text-on-surface-variant font-caption text-caption">
-                      <span>@${username_escaped}</span>
-                      <span>·</span>
-                      <span>${time_before}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <!-- Post Body -->
-              <p class="font-body-md text-body-md text-on-surface mb-space-md leading-relaxed whitespace-pre-wrap">
-                ${comment_escaped}
-              </p>
-              <!-- Action Counter Toolbar -->
-              <div class="flex items-center justify-between text-on-surface-variant font-label-sm text-label-sm mb-space-md pt-space-xs">
-                <div class="flex items-center gap-space-md">
-                  <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${post['heart_by_me'] ? 'text-primary font-bold' : ''}" aria-label="heart" onclick="toggle_like('${post['_id']}', 'heart')">
-                    <span class="icon is-small">
-                      <i class="fa ${class_heart}" aria-hidden="true"></i>
-                    </span>&nbsp;<span class="like-num">${post['count_heart']}</span>
-                  </a>
-                  <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${post['stars_by_me'] ? 'text-primary font-bold' : ''}" aria-label="stars" onclick="toggle_stars('${post['_id']}', 'stars')">
-                    <span class="icon is-small">
-                      <i class="fa ${class_stars}" aria-hidden="true"></i>
-                    </span>&nbsp;<span class="star-num">${num2str(post['count_stars'])}</span>
-                  </a>
-                  <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${post['thumbs_by_me'] ? 'text-primary font-bold' : ''}" aria-label="thumbs" onclick="toggle_thumbs('${post['_id']}', 'thumbs')">
-                    <span class="icon is-small">
-                      <i class="fa ${class_thumbs}" aria-hidden="true"></i>
-                    </span>&nbsp;<span class="thumbs-num">${num2str(post['count_thumbs'])}</span>
-                  </a>
-                  <a class="flex items-center gap-1 text-primary-container font-semibold btn-toggle-comment cursor-pointer text-inherit no-underline" aria-label="comment" onclick="toggle_comments('${post['_id']}')" title="Komentar">
-                    <span class="icon is-small">
-                      <i class="fa fa-comment-o" aria-hidden="true"></i>
-                    </span>&nbsp;<span class="comment-num" data-count="${count_comments}">${display_comment_num}</span>
-                  </a>
-                </div>
-              </div>
-
-              <!-- Container Komentar (Collapsible) -->
-              <div class="comment-section is-hidden bg-surface-container-low rounded-lg p-space-md mt-space-sm" id="comments-section-${post['_id']}">
-                <!-- Form Input Komentar Utama -->
-                <div class="comment-form mb-3">
-                  <div class="flex items-center gap-space-sm">
-                    <div class="flex-1 relative flex items-center">
-                      <input class="w-full bg-surface-container-lowest rounded-full py-space-xs pl-space-md pr-20 font-body-sm text-body-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary-container comment-input" id="input-comment-${post['_id']}" type="text" placeholder="Tulis komentar..." maxlength="2000" onkeydown="if(event.key==='Enter'){submit_comment('${post['_id']}');}" />
-                      <button class="absolute right-1 px-space-sm py-1 bg-primary-container text-on-primary font-label-sm text-label-sm rounded-full hover:bg-primary transition-colors btn-submit-comment border-0 cursor-pointer" onclick="submit_comment('${post['_id']}')">
-                        Reply
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Container List Komentar (Tree) -->
-                <div class="comment-list" id="comments-list-${post['_id']}"></div>
-              </div>
-            </article>
-            `;
-          } else {
-            html_temp = `
-            <div class="box" id="${post['_id']}">
-              <article class="media">
-                <div class="media-left">
-                  <a class="image is-64x64" href="/user/${encodeURIComponent(post['username'])}">
-                    <img class="is-rounded" src="${avatar_url}" alt="${profile_name_escaped}"/>
-                  </a>
-                </div>
-                <div class="media-content">
-                  <div class="content">
-                    <p>
-                      <strong>${profile_name_escaped}</strong> <small>@${username_escaped}</small>
-                      <small>${time_before}</small>
-                      <br/>
-                      ${comment_escaped}
-                    </p>
-                  </div>
-                  <nav class="level is-mobile mb-2">
-                    <div class="level-left"> 
-                      <a class="level-item is-sparta" aria-label="heart" onclick="toggle_like('${post['_id']}', 'heart')">
-                        <span class="icon is-small">
-                          <i class="fa ${class_heart}" aria-hidden="true"></i>
-                        </span>&nbsp;<span class="like-num">${post['count_heart']}</span>
-                      </a>
-                      <a class="level-item is-sparta" aria-label="stars" onclick="toggle_stars('${post['_id']}', 'stars')">
-                        <span class="icon is-small">
-                          <i class="fa ${class_stars}" aria-hidden="true"></i>
-                        </span>&nbsp;<span class="star-num">${num2str(post['count_stars'])}</span>
-                      </a>
-                      <a class="level-item is-sparta" aria-label="thumbs" onclick="toggle_thumbs('${post['_id']}', 'thumbs')">
-                        <span class="icon is-small">
-                          <i class="fa ${class_thumbs}" aria-hidden="true"></i>
-                        </span>&nbsp;<span class="thumbs-num">${num2str(post['count_thumbs'])}</span>
-                      </a>
-                      <a class="level-item is-sparta btn-toggle-comment" aria-label="comment" onclick="toggle_comments('${post['_id']}')" title="Komentar">
-                        <span class="icon is-small">
-                          <i class="fa fa-comment-o" aria-hidden="true"></i>
-                        </span>&nbsp;<span class="comment-num" data-count="${count_comments}">${display_comment_num}</span>
-                      </a>
-                    </div>
-                  </nav>
-
-                  <!-- Container Komentar (Collapsible) -->
-                  <div class="comment-section is-hidden" id="comments-section-${post['_id']}">
-                    <hr class="comment-divider"/>
-                    
-                    <!-- Form Input Komentar Utama -->
-                    <div class="comment-form mb-3">
-                      <div class="field has-addons">
-                        <div class="control is-expanded">
-                          <input class="input is-small is-rounded comment-input" id="input-comment-${post['_id']}" type="text" placeholder="Tulis komentar..." maxlength="2000" onkeydown="if(event.key==='Enter'){submit_comment('${post['_id']}');}" />
-                        </div>
-                        <div class="control">
-                          <button class="button is-small is-sparta is-rounded btn-submit-comment" onclick="submit_comment('${post['_id']}')">
-                            <span class="icon is-small"><i class="fa fa-paper-plane"></i></span>
-                            <span>Kirim</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- Container List Komentar (Tree) -->
-                    <div class="comment-list" id="comments-list-${post['_id']}"></div>
-                  </div>
-
-                </div>
-              </article>
-            </div>
-            `;
-          }
-          $('#post-box').append(html_temp);
+          $('#post-box').append(render_post_card(posts[i], isStitch));
         }
 
         if (window.feedHasMore) {
@@ -1022,6 +1093,234 @@ function toggle_follow(target_username, btnSelector, countSelector) {
     },
     complete: function () {
       $btn.prop('disabled', false).removeClass('opacity-75');
+    }
+  });
+}
+
+// ==========================================
+// BOOKMARKS & POST MANAGEMENT (SWEETER V2)
+// ==========================================
+
+function render_empty_bookmarks() {
+  $('#post-box').html(`
+    <div class="text-center py-12 px-6 bg-surface-container-lowest rounded-xl shadow-sm my-2" id="bookmarks-empty-state">
+      <span class="material-symbols-outlined text-[44px] text-outline-variant mb-2 block mx-auto">bookmark_border</span>
+      <h3 class="font-headline-sm text-[17px] font-bold text-on-surface mb-1">Belum ada postingan tersimpan</h3>
+      <p class="font-body-sm text-secondary max-w-sm mx-auto mb-4 leading-relaxed">
+        Simpan postingan menarik dengan menekan ikon bookmark untuk dibaca kembali nanti.
+      </p>
+      <a href="/" class="inline-block px-5 py-2 rounded-full bg-primary-container text-on-primary font-label-md text-label-md hover:bg-primary transition-all border-0 cursor-pointer shadow-sm no-underline">
+        Jelajahi Beranda
+      </a>
+    </div>
+  `);
+}
+
+function load_bookmarks(cursor, append = false) {
+  if (window.bookmarksLoading) return;
+  window.bookmarksLoading = true;
+
+  let isStitch = $('body').hasClass('bg-background');
+
+  if (append) {
+    $('#feed-loading').removeClass('hidden');
+    $('#load-more-btn').prop('disabled', true).html('<i class="fa fa-spinner fa-spin mr-1"></i> Memuat...');
+  } else {
+    $('#load-more-container').addClass('hidden');
+    if (isStitch) {
+      $('#post-box').html(`
+        <div class="text-center text-on-surface-variant py-8 font-body-sm">
+          <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat postingan tersimpan…
+        </div>
+      `);
+    } else {
+      $('#post-box').html(`
+        <div class="has-text-centered py-6">
+          <span class="icon"><i class="fa fa-spinner fa-spin"></i></span>
+          <p class="has-text-grey is-size-7 mt-1">Memuat postingan tersimpan...</p>
+        </div>
+      `);
+    }
+  }
+
+  let requestUrl = '/api/bookmarks?limit=20';
+  if (cursor) {
+    requestUrl += `&cursor=${encodeURIComponent(cursor)}`;
+  }
+
+  $.ajax({
+    type: 'GET',
+    url: requestUrl,
+    success: function (response) {
+      if (response['result'] === 'success') {
+        let posts = response['posts'] || [];
+        window.bookmarksNextCursor = response['next_cursor'];
+        window.bookmarksHasMore = Boolean(response['has_more']);
+
+        if (!append) {
+          $('#post-box').empty();
+        }
+
+        if (!posts || posts.length === 0) {
+          if (!append) {
+            render_empty_bookmarks();
+          }
+          $('#load-more-container').addClass('hidden');
+          return;
+        }
+
+        for (let i = 0; i < posts.length; i++) {
+          $('#post-box').append(render_post_card(posts[i], isStitch));
+        }
+
+        if (window.bookmarksHasMore) {
+          $('#load-more-container').removeClass('hidden');
+          $('#load-more-btn').prop('disabled', false).html('Load More');
+        } else {
+          $('#load-more-container').addClass('hidden');
+        }
+      } else {
+        handle_ajax_error(null, response['msg'] || 'Gagal memuat bookmark.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal memuat postingan tersimpan.');
+    },
+    complete: function () {
+      window.bookmarksLoading = false;
+      $('#feed-loading').addClass('hidden');
+    }
+  });
+}
+
+function toggle_bookmark(post_id) {
+  let $icon = $(`#bookmark-icon-${post_id}`);
+  let $btn = $(`#${post_id} a[aria-label='bookmark']`);
+  let isBookmarked = $icon.hasClass('fa-bookmark');
+  let endpoint = isBookmarked ? `/api/posts/${encodeURIComponent(post_id)}/unbookmark` : `/api/posts/${encodeURIComponent(post_id)}/bookmark`;
+
+  $.ajax({
+    type: 'POST',
+    url: endpoint,
+    data: {
+      post_id_give: post_id
+    },
+    success: function (res) {
+      if (res.result === 'success' || (res.result === 'fail' && res.msg === 'Post already bookmarked')) {
+        let nowBookmarked = Boolean(res.is_bookmarked);
+        if (nowBookmarked) {
+          $icon.removeClass('fa-bookmark-o').addClass('fa-bookmark text-primary');
+          $btn.addClass('text-primary font-bold has-text-primary');
+        } else {
+          $icon.removeClass('fa-bookmark text-primary').addClass('fa-bookmark-o');
+          $btn.removeClass('text-primary font-bold has-text-primary');
+
+          if (window.location.pathname.startsWith('/bookmarks')) {
+            $(`#${post_id}`).fadeOut(300, function () {
+              $(this).remove();
+              let remaining = $('#post-box > article, #post-box > .box').length;
+              if (remaining === 0) {
+                render_empty_bookmarks();
+                $('#load-more-container').addClass('hidden');
+              }
+            });
+            let $counter = $('#bookmark-count-display');
+            if ($counter.length) {
+              let count = parseInt($counter.text() || '0', 10);
+              $counter.text(Math.max(0, count - 1));
+            }
+          }
+        }
+      } else {
+        alert(res.msg || 'Gagal mengubah status bookmark.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal mengubah status bookmark.');
+    }
+  });
+}
+
+function open_edit_post(post_id) {
+  $(`#post-text-${post_id}`).addClass('hidden').hide();
+  $(`#edit-box-${post_id}`).removeClass('hidden is-hidden').show();
+  $(`#edit-textarea-${post_id}`).focus();
+}
+
+function cancel_edit_post(post_id) {
+  $(`#edit-box-${post_id}`).addClass('hidden is-hidden').hide();
+  $(`#post-text-${post_id}`).removeClass('hidden').show();
+}
+
+function submit_edit_post(post_id) {
+  let newContent = $(`#edit-textarea-${post_id}`).val().trim();
+  if (!newContent) {
+    alert('Isi postingan tidak boleh kosong.');
+    return;
+  }
+  if (newContent.length > 5000) {
+    alert('Isi postingan melebihi batas 5000 karakter.');
+    return;
+  }
+
+  let $btn = $(`#edit-box-${post_id} button.btn-save-edit`);
+  $btn.prop('disabled', true).text('Menyimpan...');
+
+  $.ajax({
+    type: 'POST',
+    url: `/api/posts/${encodeURIComponent(post_id)}/edit`,
+    data: {
+      post_id_give: post_id,
+      comment_give: newContent
+    },
+    success: function (res) {
+      if (res.result === 'success') {
+        $(`#post-text-${post_id}`).text(res.comment || newContent).removeClass('hidden').show();
+        $(`#edit-box-${post_id}`).addClass('hidden is-hidden').hide();
+        $(`#edited-badge-${post_id}`).removeClass('hidden is-hidden').show();
+      } else {
+        alert(res.msg || 'Gagal memperbarui postingan.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal memperbarui postingan.');
+    },
+    complete: function () {
+      $btn.prop('disabled', false).text('Simpan');
+    }
+  });
+}
+
+function delete_post(post_id) {
+  if (!confirm('Apakah Anda yakin ingin menghapus postingan ini? Tindakan ini tidak dapat dibatalkan.')) {
+    return;
+  }
+
+  $.ajax({
+    type: 'POST',
+    url: `/api/posts/${encodeURIComponent(post_id)}/delete`,
+    data: {
+      post_id_give: post_id
+    },
+    success: function (res) {
+      if (res.result === 'success') {
+        $(`#${post_id}`).fadeOut(300, function () {
+          $(this).remove();
+          let remaining = $('#post-box > article, #post-box > .box').length;
+          if (remaining === 0) {
+            if (window.location.pathname.startsWith('/bookmarks')) {
+              render_empty_bookmarks();
+            } else {
+              get_posts();
+            }
+          }
+        });
+      } else {
+        alert(res.msg || 'Gagal menghapus postingan.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal menghapus postingan.');
     }
   });
 }

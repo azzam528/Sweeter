@@ -53,6 +53,12 @@ def init_indexes():
         db.likes.create_index([("post_id", 1), ("type", 1)])
         db.stars.create_index([("post_id", 1), ("type", 1)])
         db.thumbs.create_index([("post_id", 1), ("type", 1)])
+        # 12. Compound unique index pada db.bookmarks: mencegah duplikasi bookmark
+        db.bookmarks.create_index([("username", 1), ("post_id", 1)], unique=True)
+        # 13. Index pada (username, created_at) untuk pengambilan bookmark tersimpan secara kronologis
+        db.bookmarks.create_index([("username", 1), ("created_at", -1)])
+        # 14. Single index pada post_id untuk pembersihan referensi bookmark saat post dihapus
+        db.bookmarks.create_index([("post_id", 1)])
     except Exception as e:
         print(f"Warning saat inisialisasi index MongoDB: {e}")
 
@@ -86,3 +92,17 @@ def count_following(username: str) -> int:
     if not username:
         return 0
     return db.follows.count_documents({"follower": username})
+
+
+def is_bookmarked(username: str, post_id: str) -> bool:
+    """Memeriksa apakah postingan telah di-bookmark oleh pengguna."""
+    if not username or not post_id:
+        return False
+    return bool(db.bookmarks.find_one({"username": username, "post_id": str(post_id)}))
+
+
+def count_bookmarks(username: str) -> int:
+    """Menghitung jumlah postingan yang di-bookmark oleh seorang pengguna."""
+    if not username:
+        return 0
+    return db.bookmarks.count_documents({"username": username})
