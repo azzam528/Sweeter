@@ -107,6 +107,7 @@
     <!-- Center nav -->
     <nav class="hidden lg:flex items-center gap-space-md">
       <a aria-current="page" class="px-space-md py-space-xs transition-colors bg-secondary-container text-on-secondary-container font-semibold rounded-full" href="/">Timeline</a>
+      <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full no-underline" href="/explore">Explore</a>
       <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full no-underline" href="/bookmarks">Bookmarks</a>
       <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full no-underline flex items-center gap-1.5" href="/notifications">
         <span>Notifications</span>
@@ -143,6 +144,10 @@
         <a aria-current="page" class="flex items-center gap-space-md px-space-md py-space-sm rounded-full transition-all bg-secondary-container text-on-secondary-container font-semibold no-underline" href="/">
           <span class="material-symbols-outlined text-[22px]">home</span>
           <span class="font-label-md text-label-md">Home</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/explore">
+          <span class="material-symbols-outlined text-[22px]">explore</span>
+          <span class="font-label-md text-label-md">Explore</span>
         </a>
         <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/user/{{ user_info.username | e }}">
           <span class="material-symbols-outlined text-[22px]">person</span>
@@ -265,11 +270,12 @@
   <!-- ===== RIGHT SIDEBAR ===== -->
   <aside class="hidden xl:flex flex-col fixed top-16 right-[max(1rem,calc((100vw-80rem)/2+2.5rem))] h-[calc(100vh-4rem)] w-[320px] z-30 py-space-lg pl-space-md overflow-y-auto">
     <div class="flex flex-col gap-space-lg">
-      <!-- Search bar (TODO: not yet functional) -->
+      <!-- Search bar -->
       <div class="relative flex items-center">
         <span class="material-symbols-outlined absolute left-space-md text-on-surface-variant text-[20px]">search</span>
         <input class="w-full pl-10 pr-space-md py-space-sm bg-surface-container-low rounded-full font-body-sm text-body-sm text-on-surface placeholder:text-on-surface-variant outline-none focus:bg-surface-container-lowest transition-colors"
-               placeholder="Search Sweeter" type="text"/>
+               placeholder="Search Sweeter" type="text"
+               onkeydown="if(event.key==='Enter'&&this.value.trim()){window.location.href='/explore?q='+encodeURIComponent(this.value.trim());}"/>
       </div>
       <!-- Trending (placeholder) -->
       <div class="p-space-lg bg-surface-container-lowest rounded-xl shadow-[0_4px_16px_-2px_rgba(88,48,48,0.03)]">

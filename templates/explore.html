@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>Explore & Trending — Sweeter</title>
+
+  <!-- Google Fonts: Manrope -->
+  <link href="https://fonts.googleapis.com" rel="preconnect"/>
+  <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+
+  <!-- Material Symbols Outlined -->
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+
+  <!-- Font Awesome 4.7 (legacy icons) -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet"/>
+
+  <!-- Bulma CSS (legacy base) -->
+  <link href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css" rel="stylesheet"/>
+
+  <!-- Sweeter Custom CSS -->
+  <link href="{{ url_for('static', filename='mystyle.css') }}" rel="stylesheet"/>
+
+  <!-- jQuery -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            "surface-container-high": "#e9e8e6",
+            "outline": "#837372",
+            "background": "#faf9f7",
+            "surface-container-highest": "#e3e2e0",
+            "secondary-container": "#f1dfdc",
+            "inverse-primary": "#f3b8b7",
+            "primary-fixed-dim": "#f3b8b7",
+            "on-background": "#1a1c1b",
+            "inverse-surface": "#2f3130",
+            "on-error": "#ffffff",
+            "surface-container-lowest": "#ffffff",
+            "primary-container": "#583030",
+            "surface": "#faf9f7",
+            "surface-container": "#efeeec",
+            "surface-container-low": "#f4f3f1",
+            "secondary": "#675c59",
+            "on-surface": "#1a1c1b",
+            "on-secondary-container": "#6b605d",
+            "primary": "#3e1b1b",
+            "outline-variant": "#d5c2c1",
+            "on-primary-container": "#cf9897",
+            "on-surface-variant": "#4f4544"
+          },
+          borderRadius: { DEFAULT: "0.25rem", lg: "0.5rem", xl: "0.75rem", full: "9999px" },
+          spacing: {
+            "space-md": "1rem", "margin-desktop": "2.5rem", "space-xs": "0.25rem",
+            "space-lg": "1.5rem", "space-sm": "0.5rem"
+          },
+          fontFamily: { "body-md": ["Manrope"], "headline-sm": ["Manrope"], "label-md": ["Manrope"], "caption": ["Manrope"] }
+        }
+      }
+    };
+  </script>
+</head>
+
+<body class="bg-background font-body-md text-body-md text-on-surface antialiased">
+
+<!-- ===== HEADER / TOP NAVBAR ===== -->
+<header class="fixed top-0 left-0 right-0 z-40 bg-surface/80 backdrop-blur-xl shadow-[0_1px_8px_rgba(88,48,48,0.04)]">
+  <div class="h-16 max-w-7xl mx-auto px-4 md:px-margin-desktop flex items-center justify-between">
+    <div class="flex items-center gap-space-sm">
+      <a href="/" class="font-headline-sm text-headline-sm text-primary font-bold tracking-tight no-underline">Sweeter</a>
+    </div>
+    <nav class="hidden lg:flex items-center gap-space-md">
+      <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full no-underline" href="/">Timeline</a>
+      <a aria-current="page" class="px-space-md py-space-xs transition-colors bg-secondary-container text-on-secondary-container font-semibold rounded-full no-underline" href="/explore">Explore</a>
+      <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full no-underline" href="/bookmarks">Bookmarks</a>
+      <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full no-underline flex items-center gap-1.5" href="/notifications">
+        <span>Notifications</span>
+        <span id="header-unread-badge" class="hidden bg-primary-container text-on-primary text-[10px] font-bold px-1.5 py-0.2 rounded-full"></span>
+      </a>
+    </nav>
+    <div class="flex items-center gap-space-md">
+      <div class="flex items-center gap-space-sm">
+        <span class="font-label-md text-label-md text-on-surface hidden sm:inline-block">{{ user_info.profile_name | e }}</span>
+        <a href="/user/{{ user_info.username | e }}">
+          <img alt="Profile" class="w-8 h-8 rounded-full object-cover cursor-pointer" src="/static/{{ user_info.profile_pic_real | e }}" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+        </a>
+      </div>
+      <form action="/sign_out" method="post" class="inline m-0">
+        <button type="submit" class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full hover:bg-surface-container border-0 bg-transparent cursor-pointer">
+          Sign Out
+        </button>
+      </form>
+    </div>
+  </div>
+</header>
+
+<div class="max-w-7xl mx-auto px-4 md:px-margin-desktop">
+
+  <!-- ===== LEFT SIDEBAR ===== -->
+  <aside class="hidden md:flex fixed top-16 left-[max(1rem,calc((100vw-80rem)/2+2.5rem))] h-[calc(100vh-4rem)] w-[240px] z-30 flex-col justify-between py-space-lg pr-space-md bg-transparent">
+    <div class="flex flex-col gap-space-lg">
+      <nav class="flex flex-col gap-space-xs">
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/">
+          <span class="material-symbols-outlined text-[22px]">home</span>
+          <span class="font-label-md text-label-md">Home</span>
+        </a>
+        <a aria-current="page" class="flex items-center gap-space-md px-space-md py-space-sm rounded-full transition-all bg-secondary-container text-on-secondary-container font-semibold no-underline" href="/explore">
+          <span class="material-symbols-outlined text-[22px]">explore</span>
+          <span class="font-label-md text-label-md">Explore</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/user/{{ user_info.username | e }}">
+          <span class="material-symbols-outlined text-[22px]">person</span>
+          <span class="font-label-md text-label-md">Profile</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/bookmarks">
+          <span class="material-symbols-outlined text-[22px]">bookmark</span>
+          <span class="font-label-md text-label-md">Bookmarks</span>
+        </a>
+        <a class="flex items-center justify-between px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/notifications" id="sidebar-notifications-link">
+          <div class="flex items-center gap-space-md">
+            <span class="material-symbols-outlined text-[22px]">notifications</span>
+            <span class="font-label-md text-label-md">Notifications</span>
+          </div>
+          <span id="nav-unread-badge" class="hidden bg-primary-container text-on-primary text-caption font-bold px-2 py-0.5 rounded-full text-[11px] leading-tight"></span>
+        </a>
+      </nav>
+      <a href="/" class="w-full flex items-center justify-center gap-space-xs py-space-sm px-space-lg bg-primary-container text-on-primary rounded-full font-label-md text-label-md hover:bg-primary transition-all shadow-[0_4px_16px_-2px_rgba(88,48,48,0.2)] no-underline">
+        <span class="material-symbols-outlined text-[20px]">edit_note</span>
+        <span>Create Post</span>
+      </a>
+    </div>
+    <!-- Bottom user identity card -->
+    <a href="/user/{{ user_info.username | e }}" class="flex items-center justify-between p-space-sm rounded-xl bg-surface-container-low hover:bg-surface-container transition-colors cursor-pointer no-underline">
+      <div class="flex items-center gap-space-sm min-w-0">
+        <img alt="Profile" class="w-10 h-10 rounded-full object-cover flex-shrink-0" src="/static/{{ user_info.profile_pic_real | e }}" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+        <div class="flex flex-col min-w-0">
+          <span class="font-label-md text-label-md text-on-surface truncate">{{ user_info.profile_name | e }}</span>
+          <span class="font-caption text-caption text-on-surface-variant truncate">@{{ user_info.username | e }}</span>
+        </div>
+      </div>
+      <span class="material-symbols-outlined text-on-surface-variant text-[20px]">more_horiz</span>
+    </a>
+  </aside>
+
+  <!-- ===== MAIN CONTENT COLUMN ===== -->
+  <div class="pl-0 md:pl-[264px] pr-0 xl:pr-[344px] min-h-screen">
+    <main class="relative pt-16 bg-transparent max-w-[620px] mx-auto min-h-screen py-space-lg">
+      <div class="flex flex-col w-full">
+
+        <!-- Sticky Search & Explore Header -->
+        <section class="sticky top-16 z-20 backdrop-blur-md bg-surface/90 px-space-md py-space-sm mb-space-md border-b border-surface-container/60">
+          <!-- Search Bar -->
+          <div class="relative flex items-center mb-space-sm">
+            <span class="material-symbols-outlined absolute left-space-md text-on-surface-variant text-[20px]">search</span>
+            <input id="explore-search-input"
+                   class="w-full pl-10 pr-10 py-2.5 bg-surface-container-low rounded-full font-body-sm text-body-sm text-on-surface placeholder:text-on-surface-variant outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary-container transition-all"
+                   placeholder="Cari topik, pengguna (@user), atau postingan..."
+                   type="text"
+                   maxlength="100"/>
+            <button id="clear-search-btn" type="button" class="hidden absolute right-3 text-on-surface-variant hover:text-on-surface border-0 bg-transparent cursor-pointer p-1">
+              <span class="material-symbols-outlined text-[18px]">cancel</span>
+            </button>
+          </div>
+
+          <!-- Explore Tabs -->
+          <div class="flex items-center justify-between overflow-x-auto no-scrollbar gap-space-sm" id="explore-tabs">
+            <div class="flex items-center gap-space-md min-w-max">
+              <button id="tab-trending"
+                      class="explore-tab relative pb-2 font-label-md text-label-md text-primary font-bold cursor-pointer border-0 bg-transparent transition-colors"
+                      data-tab="trending"
+                      onclick="switch_explore_tab('trending')">
+                <span>Trending</span>
+                <span class="tab-indicator absolute bottom-0 left-0 right-0 h-[2.5px] bg-primary-container rounded-full"></span>
+              </button>
+              <button id="tab-topics"
+                      class="explore-tab relative pb-2 font-label-md text-label-md text-on-surface-variant hover:text-on-surface cursor-pointer border-0 bg-transparent transition-colors"
+                      data-tab="topics"
+                      onclick="switch_explore_tab('topics')">
+                <span>Topik Populer</span>
+                <span class="tab-indicator hidden absolute bottom-0 left-0 right-0 h-[2.5px] bg-primary-container rounded-full"></span>
+              </button>
+              <button id="tab-people"
+                      class="explore-tab relative pb-2 font-label-md text-label-md text-on-surface-variant hover:text-on-surface cursor-pointer border-0 bg-transparent transition-colors"
+                      data-tab="people"
+                      onclick="switch_explore_tab('people')">
+                <span>Temukan Akun</span>
+                <span class="tab-indicator hidden absolute bottom-0 left-0 right-0 h-[2.5px] bg-primary-container rounded-full"></span>
+              </button>
+              <button id="tab-latest"
+                      class="explore-tab relative pb-2 font-label-md text-label-md text-on-surface-variant hover:text-on-surface cursor-pointer border-0 bg-transparent transition-colors"
+                      data-tab="latest"
+                      onclick="switch_explore_tab('latest')">
+                <span>Terbaru</span>
+                <span class="tab-indicator hidden absolute bottom-0 left-0 right-0 h-[2.5px] bg-primary-container rounded-full"></span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Period Filter Chips (Visible for Trending tab) -->
+          <div id="period-chips-container" class="flex items-center gap-2 pt-2.5 pb-1">
+            <span class="font-caption text-caption text-on-surface-variant mr-1">Periode:</span>
+            <button class="trending-chip px-3 py-1 rounded-full text-label-sm font-semibold transition-all border-0 cursor-pointer bg-surface-container-high text-on-surface-variant hover:text-on-surface"
+                    data-period="today"
+                    onclick="switch_trending_period('today')">
+              Hari Ini
+            </button>
+            <button class="trending-chip px-3 py-1 rounded-full text-label-sm font-semibold transition-all border-0 cursor-pointer bg-primary-container text-on-primary shadow-sm"
+                    data-period="week"
+                    onclick="switch_trending_period('week')">
+              Minggu Ini
+            </button>
+            <button class="trending-chip px-3 py-1 rounded-full text-label-sm font-semibold transition-all border-0 cursor-pointer bg-surface-container-high text-on-surface-variant hover:text-on-surface"
+                    data-period="all"
+                    onclick="switch_trending_period('all')">
+              Semua Waktu
+            </button>
+          </div>
+        </section>
+
+        <!-- Search Results Section (Shown when search query is active) -->
+        <div id="search-results-section" class="hidden flex flex-col gap-space-md mb-space-md">
+          <div class="px-space-md flex items-center justify-between text-on-surface-variant font-label-md">
+            <span>Hasil Pencarian untuk <strong id="search-query-display" class="text-on-surface"></strong></span>
+          </div>
+
+          <!-- Matching Hashtags Container -->
+          <div id="search-hashtags-box" class="hidden bg-surface-container-lowest p-space-md rounded-xl shadow-sm">
+            <h4 class="font-label-md font-bold text-on-surface mb-2">Tag Relevan</h4>
+            <div id="search-hashtags-list" class="flex flex-wrap gap-2"></div>
+          </div>
+
+          <!-- Matching Users Container -->
+          <div id="search-users-box" class="hidden bg-surface-container-lowest p-space-md rounded-xl shadow-sm">
+            <h4 class="font-label-md font-bold text-on-surface mb-2">Pengguna</h4>
+            <div id="search-users-list" class="flex flex-col gap-space-sm divide-y divide-surface-container-high"></div>
+          </div>
+
+          <!-- Matching Posts Container -->
+          <div id="search-posts-box" class="flex flex-col gap-space-md"></div>
+        </div>
+
+        <!-- Dynamic Explore Posts Container (Trending / Latest) -->
+        <div id="explore-post-box" class="flex flex-col gap-space-md">
+          <div class="text-center text-on-surface-variant py-8 font-body-sm">
+            <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat konten explore…
+          </div>
+        </div>
+
+        <!-- Topics Container (When Topik Populer tab is active) -->
+        <div id="explore-topics-box" class="hidden flex flex-col gap-space-sm"></div>
+
+        <!-- Discover People Container (When Temukan Akun tab is active) -->
+        <div id="explore-people-box" class="hidden flex flex-col gap-space-sm"></div>
+
+        <!-- Loading Spinner -->
+        <div id="explore-loading" class="hidden text-center py-6 text-on-surface-variant font-body-sm">
+          <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat...
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- ===== RIGHT SIDEBAR ===== -->
+  <aside class="hidden xl:flex flex-col fixed top-16 right-[max(1rem,calc((100vw-80rem)/2+2.5rem))] h-[calc(100vh-4rem)] w-[320px] z-30 py-space-lg pl-space-md overflow-y-auto">
+    <div class="flex flex-col gap-space-lg">
+      
+      <!-- Topik Populer Widget -->
+      <div class="p-space-lg bg-surface-container-lowest rounded-xl shadow-[0_4px_16px_-2px_rgba(88,48,48,0.03)]">
+        <h3 class="font-headline-sm text-headline-sm text-on-surface mb-space-md flex items-center justify-between">
+          <span>Topik Populer</span>
+          <span class="material-symbols-outlined text-[18px] text-primary">trending_up</span>
+        </h3>
+        <div id="widget-trending-hashtags" class="flex flex-col gap-space-md">
+          {% if trending_tags %}
+            {% for t in trending_tags %}
+              <a href="{{ t.url }}" class="group cursor-pointer no-underline block hover:bg-surface-container-low p-1.5 rounded-lg transition-colors">
+                <span class="font-caption text-caption text-on-surface-variant">Topik · Trending</span>
+                <p class="font-label-md text-label-md text-primary font-bold group-hover:underline m-0">{{ t.display_tag }}</p>
+                <span class="font-caption text-caption text-on-surface-variant">{{ t.post_count }} postingan</span>
+              </a>
+            {% endfor %}
+          {% else %}
+            <p class="font-caption text-caption text-on-surface-variant italic">Belum ada topik populer.</p>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Rekomendasi Akun Widget -->
+      <div class="p-space-lg bg-surface-container-lowest rounded-xl shadow-[0_4px_16px_-2px_rgba(88,48,48,0.03)]">
+        <h3 class="font-headline-sm text-headline-sm text-on-surface mb-space-md flex items-center justify-between">
+          <span>Temukan Teman</span>
+          <span class="material-symbols-outlined text-[18px] text-primary">person_add</span>
+        </h3>
+        <div id="widget-suggested-users" class="flex flex-col gap-space-sm divide-y divide-surface-container-high/60">
+          {% if suggested_users %}
+            {% for u in suggested_users %}
+              <div class="pt-2 first:pt-0 flex items-center justify-between gap-2">
+                <a href="/user/{{ u.username }}" class="flex items-center gap-2 min-w-0 no-underline text-inherit hover:opacity-90">
+                  <img src="/static/{{ u.profile_pic_real }}" class="w-9 h-9 rounded-full object-cover shrink-0" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+                  <div class="flex flex-col min-w-0">
+                    <span class="font-label-sm text-label-sm font-semibold text-on-surface truncate">{{ u.profile_name }}</span>
+                    <span class="font-caption text-caption text-on-surface-variant truncate">@{{ u.username }}</span>
+                  </div>
+                </a>
+                <button type="button"
+                        class="btn-follow-widget px-3 py-1 rounded-full bg-primary-container text-on-primary font-label-sm text-label-sm hover:bg-primary transition-all border-0 cursor-pointer shrink-0"
+                        data-username="{{ u.username }}"
+                        onclick="toggle_follow_simple('{{ u.username }}', this)">
+                  Follow
+                </button>
+              </div>
+            {% endfor %}
+          {% else %}
+            <p class="font-caption text-caption text-on-surface-variant italic">Belum ada saran pengguna baru.</p>
+          {% endif %}
+        </div>
+      </div>
+
+      <footer class="px-space-sm font-caption text-caption text-on-surface-variant flex flex-wrap gap-x-space-md gap-y-space-xs leading-relaxed">
+        <span>© 2025 Sweeter</span>
+      </footer>
+    </div>
+  </aside>
+
+</div>
+
+<!-- Quote Post Modal -->
+<div id="quote-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+  <div class="bg-surface-container-lowest rounded-2xl w-full max-w-lg shadow-xl border border-outline-variant/30 overflow-hidden flex flex-col max-h-[90vh]">
+    <div class="flex items-center justify-between px-5 py-3.5 border-b border-surface-container-high">
+      <h3 class="font-headline-sm text-[17px] font-bold text-on-surface m-0">Kutip Postingan</h3>
+      <button type="button" onclick="close_quote_modal()" class="p-1 rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors border-0 bg-transparent cursor-pointer">
+        <span class="material-symbols-outlined text-[20px]">close</span>
+      </button>
+    </div>
+    <div class="p-5 overflow-y-auto flex-1">
+      <input type="hidden" id="quote-target-id" value="" />
+      <textarea id="quote-textarea"
+                class="w-full bg-surface-container-low rounded-xl p-3 font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary-container resize-none transition-all"
+                rows="3"
+                maxlength="5000"
+                placeholder="Tambahkan komentar Anda..."></textarea>
+      
+      <div id="quote-preview-card" class="mt-3 p-3.5 rounded-xl border border-outline-variant/50 bg-surface-container-low/60">
+        <div class="flex items-center gap-2 mb-1.5">
+          <img id="quote-preview-avatar" class="w-6 h-6 rounded-full object-cover shrink-0" src="/static/profile_pics/profile_placeholder.png" alt=""/>
+          <span id="quote-preview-name" class="font-label-sm font-semibold text-on-surface"></span>
+          <span id="quote-preview-username" class="font-caption text-on-surface-variant"></span>
+        </div>
+        <p id="quote-preview-comment" class="font-body-sm text-on-surface whitespace-pre-wrap leading-relaxed line-clamp-3 m-0"></p>
+      </div>
+    </div>
+    <div class="flex items-center justify-end gap-2 px-5 py-3 border-t border-surface-container-high bg-surface-container-low/30">
+      <button type="button" onclick="close_quote_modal()" class="px-4 py-1.5 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container-high transition-colors border-0 bg-transparent cursor-pointer">
+        Batal
+      </button>
+      <button type="button" id="btn-submit-quote" onclick="submit_quote_post()" class="px-5 py-1.5 rounded-full bg-primary-container text-on-primary font-label-md text-label-md hover:bg-primary transition-colors border-0 cursor-pointer shadow-sm">
+        Kirim Kutipan
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SWEETER DYNAMIC JS ===== -->
+<script src="{{ url_for('static', filename='myjs.js') }}"></script>
+
+<script>
+  $(document).ready(function () {
+    window.isExplorePage = true;
+    init_explore_page();
+  });
+</script>
+
+</body>
+</html>

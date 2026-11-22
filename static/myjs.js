@@ -156,6 +156,15 @@ function load_more_posts() {
   get_posts(window.currentProfileUsername || '', window.currentFeedTab || 'following', window.feedNextCursor, true);
 }
 
+// --- Hashtag Linkifier Helper ---
+
+function linkify_hashtags(escapedText) {
+  if (!escapedText) return '';
+  return escapedText.replace(/(^|[^\w/])#([a-zA-Z0-9_]{1,50})\b/g, function (match, prefix, tag) {
+    return `${prefix}<a href="/explore/tags/${encodeURIComponent(tag.toLowerCase())}" class="text-primary hover:underline font-semibold no-underline" onclick="event.stopPropagation()">#${tag}</a>`;
+  });
+}
+
 // --- Post Card Renderer (Stitch & Bulma) ---
 
 function render_post_card(post, isStitch) {
@@ -174,7 +183,8 @@ function render_post_card(post, isStitch) {
   let avatar_url = sanitizeAvatarUrl(post['profile_pic_real']);
   let profile_name_escaped = escapeHtml(post['profile_name']);
   let username_escaped = escapeHtml(post['username']);
-  let comment_escaped = escapeHtml(post['comment']);
+  let comment_raw_escaped = escapeHtml(post['comment']);
+  let comment_escaped = linkify_hashtags(comment_raw_escaped);
 
   let is_edited = Boolean(post['is_edited']);
   let is_mine = Boolean(post['is_mine']);
@@ -222,7 +232,8 @@ function render_post_card(post, isStitch) {
       avatar_url = sanitizeAvatarUrl(orig['profile_pic_real']);
       profile_name_escaped = escapeHtml(orig['profile_name']);
       username_escaped = escapeHtml(orig['username']);
-      comment_escaped = escapeHtml(orig['comment']);
+      comment_raw_escaped = escapeHtml(orig['comment']);
+      comment_escaped = linkify_hashtags(comment_raw_escaped);
       time_before = time2str(new Date(orig['date']));
       is_edited = Boolean(orig['is_edited']);
 
@@ -256,6 +267,7 @@ function render_post_card(post, isStitch) {
         </div>
       `;
     } else {
+      let orig_quote_comment = linkify_hashtags(escapeHtml(orig['comment']));
       quote_embed_stitch = `
         <div class="mt-2 mb-space-md p-3.5 rounded-xl border border-outline-variant/60 bg-surface-container-low/60 hover:bg-surface-container-low transition-colors cursor-pointer" onclick="window.location.href='/user/${encodeURIComponent(orig.username)}#${orig._id}'">
           <div class="flex items-center gap-2 mb-1.5">
@@ -265,7 +277,7 @@ function render_post_card(post, isStitch) {
             <span class="font-caption text-on-surface-variant">·</span>
             <span class="font-caption text-on-surface-variant">${time2str(new Date(orig.date))}</span>
           </div>
-          <p class="font-body-sm text-on-surface whitespace-pre-wrap leading-relaxed m-0 line-clamp-4">${escapeHtml(orig.comment)}</p>
+          <p class="font-body-sm text-on-surface whitespace-pre-wrap leading-relaxed m-0 line-clamp-4">${orig_quote_comment}</p>
         </div>
       `;
       quote_embed_bulma = `
@@ -277,7 +289,7 @@ function render_post_card(post, isStitch) {
             <strong class="is-size-7">${escapeHtml(orig.profile_name)}</strong>
             <small class="has-text-grey ml-1 is-size-7">@${escapeHtml(orig.username)} · ${time2str(new Date(orig.date))}</small>
           </div>
-          <p class="is-size-7">${escapeHtml(orig.comment)}</p>
+          <p class="is-size-7">${orig_quote_comment}</p>
         </div>
       `;
     }
@@ -346,7 +358,7 @@ function render_post_card(post, isStitch) {
       <!-- Inline Edit Box -->
       ${post_type !== 'repost' ? `
       <div id="edit-box-${post['_id']}" class="hidden mb-space-md bg-surface-container-low p-space-sm rounded-lg">
-        <textarea id="edit-textarea-${post['_id']}" class="w-full bg-surface-container-lowest rounded-lg p-space-sm font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary-container resize-none transition-all" rows="3" maxlength="5000">${comment_escaped}</textarea>
+        <textarea id="edit-textarea-${post['_id']}" class="w-full bg-surface-container-lowest rounded-lg p-space-sm font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary-container resize-none transition-all" rows="3" maxlength="5000">${comment_raw_escaped}</textarea>
         <div class="flex items-center justify-end gap-space-xs mt-space-xs">
           <button type="button" onclick="cancel_edit_post('${post['_id']}')" class="px-space-sm py-1 font-label-sm text-label-sm text-on-surface-variant hover:bg-surface-container-high rounded-full border-0 bg-transparent cursor-pointer">Batal</button>
           <button type="button" onclick="submit_edit_post('${post['_id']}')" class="px-space-md py-1 bg-primary-container text-on-primary font-label-sm text-label-sm rounded-full hover:bg-primary transition-colors border-0 cursor-pointer btn-save-edit">Simpan</button>
@@ -470,7 +482,7 @@ function render_post_card(post, isStitch) {
             ${quote_embed_bulma}
             ${post_type !== 'repost' ? `
             <div id="edit-box-${post['_id']}" class="is-hidden mb-3">
-              <textarea id="edit-textarea-${post['_id']}" class="textarea is-small" rows="3" maxlength="5000">${comment_escaped}</textarea>
+              <textarea id="edit-textarea-${post['_id']}" class="textarea is-small" rows="3" maxlength="5000">${comment_raw_escaped}</textarea>
               <div class="buttons is-right mt-1">
                 <button type="button" class="button is-small is-light" onclick="cancel_edit_post('${post['_id']}')">Batal</button>
                 <button type="button" class="button is-small is-sparta btn-save-edit" onclick="submit_edit_post('${post['_id']}')">Simpan</button>
@@ -2010,3 +2022,530 @@ $(document).on('keydown', function (e) {
     close_quote_modal();
   }
 });
+
+// --- Explore & Trending & Search Client Functions ---
+
+window.currentExploreTab = 'trending';
+window.currentTrendingPeriod = 'week';
+window.currentTopicTag = '';
+window.currentTopicSort = 'trending';
+
+function init_explore_page() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const qParam = urlParams.get('q');
+  const tabParam = urlParams.get('tab');
+
+  // Live search input with 300ms debounce
+  let searchTimer = null;
+  $('#explore-search-input').on('input', function () {
+    let q = $(this).val().trim();
+    if (q) {
+      $('#clear-search-btn').removeClass('hidden');
+    } else {
+      $('#clear-search-btn').addClass('hidden');
+    }
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(function () {
+      execute_explore_search(q);
+    }, 300);
+  });
+
+  $('#explore-search-input').on('keydown', function (e) {
+    if (e.key === 'Enter') {
+      clearTimeout(searchTimer);
+      execute_explore_search($(this).val().trim());
+    }
+  });
+
+  $('#clear-search-btn').on('click', function () {
+    $('#explore-search-input').val('');
+    $(this).addClass('hidden');
+    execute_explore_search('');
+  });
+
+  if (qParam) {
+    $('#explore-search-input').val(qParam);
+    $('#clear-search-btn').removeClass('hidden');
+    execute_explore_search(qParam);
+  } else if (tabParam) {
+    switch_explore_tab(tabParam);
+  } else {
+    switch_explore_tab('trending');
+  }
+}
+
+function switch_explore_tab(tab) {
+  if (['trending', 'topics', 'people', 'latest'].indexOf(tab) === -1) {
+    tab = 'trending';
+  }
+  window.currentExploreTab = tab;
+
+  // Update tabs visual state
+  $('.explore-tab').removeClass('text-primary font-bold').addClass('text-on-surface-variant font-medium');
+  $('.explore-tab .tab-indicator').addClass('hidden');
+
+  let $activeBtn = $(`#tab-${tab}`);
+  $activeBtn.removeClass('text-on-surface-variant font-medium').addClass('text-primary font-bold');
+  $activeBtn.find('.tab-indicator').removeClass('hidden');
+
+  // Hide search results when switching tabs
+  $('#search-results-section').addClass('hidden');
+
+  if (tab === 'trending') {
+    $('#period-chips-container').removeClass('hidden');
+    $('#explore-post-box').removeClass('hidden');
+    $('#explore-topics-box').addClass('hidden');
+    $('#explore-people-box').addClass('hidden');
+    load_trending_posts(window.currentTrendingPeriod || 'week');
+  } else if (tab === 'topics') {
+    $('#period-chips-container').addClass('hidden');
+    $('#explore-post-box').addClass('hidden');
+    $('#explore-topics-box').removeClass('hidden');
+    $('#explore-people-box').addClass('hidden');
+    load_explore_topics();
+  } else if (tab === 'people') {
+    $('#period-chips-container').addClass('hidden');
+    $('#explore-post-box').addClass('hidden');
+    $('#explore-topics-box').addClass('hidden');
+    $('#explore-people-box').removeClass('hidden');
+    load_discover_people();
+  } else if (tab === 'latest') {
+    $('#period-chips-container').addClass('hidden');
+    $('#explore-post-box').removeClass('hidden');
+    $('#explore-topics-box').addClass('hidden');
+    $('#explore-people-box').addClass('hidden');
+    load_latest_explore_posts();
+  }
+}
+
+function switch_trending_period(period) {
+  if (['today', 'week', 'all'].indexOf(period) === -1) {
+    period = 'week';
+  }
+  window.currentTrendingPeriod = period;
+
+  // Update period chip styles
+  $('.trending-chip').removeClass('bg-primary-container text-on-primary shadow-sm')
+                     .addClass('bg-surface-container-high text-on-surface-variant hover:text-on-surface');
+
+  $(`.trending-chip[data-period="${period}"]`)
+    .removeClass('bg-surface-container-high text-on-surface-variant hover:text-on-surface')
+    .addClass('bg-primary-container text-on-primary shadow-sm');
+
+  load_trending_posts(period);
+}
+
+function load_trending_posts(period) {
+  $('#explore-post-box').html(`
+    <div class="text-center text-on-surface-variant py-8 font-body-sm">
+      <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat postingan trending…
+    </div>
+  `);
+
+  $.ajax({
+    type: 'GET',
+    url: `/api/trending?period=${encodeURIComponent(period)}&limit=25`,
+    success: function (res) {
+      if (res.result === 'success') {
+        let posts = res.posts || [];
+        $('#explore-post-box').empty();
+        if (posts.length === 0) {
+          let periodLabel = period === 'today' ? 'hari ini' : (period === 'week' ? 'minggu ini' : 'semua waktu');
+          $('#explore-post-box').html(`
+            <div class="text-center py-12 px-6 bg-surface-container-lowest rounded-xl shadow-sm my-2">
+              <span class="material-symbols-outlined text-[44px] text-outline-variant mb-2 block mx-auto">trending_up</span>
+              <h3 class="font-headline-sm text-[17px] font-bold text-on-surface mb-1">Belum ada postingan trending</h3>
+              <p class="font-body-sm text-secondary max-w-sm mx-auto mb-4 leading-relaxed">
+                Belum ada postingan yang trending untuk periode ${periodLabel}. Mulai obrolan seru dan buat postingan Anda viral!
+              </p>
+            </div>
+          `);
+          return;
+        }
+
+        for (let i = 0; i < posts.length; i++) {
+          $('#explore-post-box').append(render_post_card(posts[i], true));
+        }
+      } else {
+        $('#explore-post-box').html(`
+          <div class="text-center py-8 text-on-surface-variant font-body-sm">
+            <p>${escapeHtml(res.msg || 'Gagal memuat postingan trending.')}</p>
+          </div>
+        `);
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal memuat postingan trending.');
+    }
+  });
+}
+
+function load_explore_topics() {
+  $('#explore-topics-box').html(`
+    <div class="text-center text-on-surface-variant py-8 font-body-sm">
+      <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat topik populer…
+    </div>
+  `);
+
+  $.ajax({
+    type: 'GET',
+    url: '/api/trending/hashtags?limit=30',
+    success: function (res) {
+      if (res.result === 'success') {
+        let tags = res.hashtags || [];
+        $('#explore-topics-box').empty();
+        if (tags.length === 0) {
+          $('#explore-topics-box').html(`
+            <div class="text-center py-12 px-6 bg-surface-container-lowest rounded-xl shadow-sm my-2">
+              <span class="material-symbols-outlined text-[44px] text-outline-variant mb-2 block mx-auto">tag</span>
+              <h3 class="font-headline-sm text-[17px] font-bold text-on-surface mb-1">Belum ada topik</h3>
+              <p class="font-body-sm text-secondary max-w-sm mx-auto mb-4 leading-relaxed">
+                Gunakan hashtag (misal: #teknologi, #sweeter) pada postingan Anda untuk memicu topik baru!
+              </p>
+            </div>
+          `);
+          return;
+        }
+
+        let html = '<div class="grid grid-cols-1 gap-2.5">';
+        for (let i = 0; i < tags.length; i++) {
+          let t = tags[i];
+          html += `
+            <a href="${t.url}" class="group p-4 bg-surface-container-lowest rounded-xl shadow-sm hover:shadow-md transition-all flex items-center justify-between no-underline text-inherit cursor-pointer">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-secondary-container/60 flex items-center justify-center text-primary shrink-0">
+                  <span class="material-symbols-outlined text-[20px]">tag</span>
+                </div>
+                <div>
+                  <span class="font-label-md text-label-md text-primary font-bold group-hover:underline">${escapeHtml(t.display_tag)}</span>
+                  <p class="font-caption text-caption text-on-surface-variant m-0">${t.post_count} postingan relevan</p>
+                </div>
+              </div>
+              <span class="material-symbols-outlined text-outline text-[20px] group-hover:translate-x-0.5 transition-transform">arrow_forward</span>
+            </a>
+          `;
+        }
+        html += '</div>';
+        $('#explore-topics-box').html(html);
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal memuat topik populer.');
+    }
+  });
+}
+
+function load_discover_people() {
+  $('#explore-people-box').html(`
+    <div class="text-center text-on-surface-variant py-8 font-body-sm">
+      <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Mencari rekomendasi pengguna…
+    </div>
+  `);
+
+  $.ajax({
+    type: 'GET',
+    url: '/api/discover/people?limit=15',
+    success: function (res) {
+      if (res.result === 'success') {
+        let users = res.users || [];
+        $('#explore-people-box').empty();
+        if (users.length === 0) {
+          $('#explore-people-box').html(`
+            <div class="text-center py-12 px-6 bg-surface-container-lowest rounded-xl shadow-sm my-2">
+              <span class="material-symbols-outlined text-[44px] text-outline-variant mb-2 block mx-auto">group_add</span>
+              <h3 class="font-headline-sm text-[17px] font-bold text-on-surface mb-1">Semua sudah terhubung!</h3>
+              <p class="font-body-sm text-secondary max-w-sm mx-auto mb-4 leading-relaxed">
+                Anda sudah mengikuti semua pengguna aktif yang tersedia di Sweeter.
+              </p>
+            </div>
+          `);
+          return;
+        }
+
+        let html = '<div class="flex flex-col gap-2.5">';
+        for (let i = 0; i < users.length; i++) {
+          let u = users[i];
+          let avatarUrl = sanitizeAvatarUrl(u.profile_pic_real);
+          let reasonBadge = u.recommendation_reason
+            ? `<span class="inline-flex items-center gap-1 text-[11px] font-semibold text-primary bg-secondary-container/50 px-2 py-0.5 rounded-full mt-1"><span class="material-symbols-outlined text-[13px]">verified</span> ${escapeHtml(u.recommendation_reason)}</span>`
+            : '';
+
+          html += `
+            <div class="p-4 bg-surface-container-lowest rounded-xl shadow-sm hover:shadow-md transition-all flex items-center justify-between gap-3">
+              <a href="/user/${encodeURIComponent(u.username)}" class="flex items-center gap-3 min-w-0 no-underline text-inherit group">
+                <img src="${avatarUrl}" class="w-12 h-12 rounded-full object-cover shrink-0" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+                <div class="flex flex-col min-w-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="font-label-md text-label-md font-bold text-on-surface group-hover:underline truncate">${escapeHtml(u.profile_name)}</span>
+                    <span class="font-caption text-caption text-on-surface-variant truncate">@${escapeHtml(u.username)}</span>
+                  </div>
+                  ${u.profile_info ? `<p class="font-body-sm text-body-sm text-on-surface-variant m-0 line-clamp-1">${escapeHtml(u.profile_info)}</p>` : ''}
+                  <div class="flex items-center gap-2 mt-0.5">
+                    <span class="font-caption text-caption text-on-surface-variant">${u.follower_count || 0} followers</span>
+                    ${reasonBadge}
+                  </div>
+                </div>
+              </a>
+              <button type="button"
+                      class="px-4 py-1.5 rounded-full bg-primary-container text-on-primary font-label-md text-label-md hover:bg-primary transition-all border-0 cursor-pointer shrink-0 shadow-sm"
+                      data-username="${escapeHtml(u.username)}"
+                      onclick="toggle_follow_simple('${escapeHtml(u.username)}', this)">
+                Follow
+              </button>
+            </div>
+          `;
+        }
+        html += '</div>';
+        $('#explore-people-box').html(html);
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal memuat rekomendasi pengguna.');
+    }
+  });
+}
+
+function load_latest_explore_posts() {
+  $('#explore-post-box').html(`
+    <div class="text-center text-on-surface-variant py-8 font-body-sm">
+      <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat postingan terbaru…
+    </div>
+  `);
+
+  $.ajax({
+    type: 'GET',
+    url: '/get_posts?tab=explore&limit=25',
+    success: function (res) {
+      if (res.result === 'success') {
+        let posts = res.posts || [];
+        $('#explore-post-box').empty();
+        if (posts.length === 0) {
+          $('#explore-post-box').html(`
+            <div class="text-center py-12 px-6 bg-surface-container-lowest rounded-xl shadow-sm my-2">
+              <span class="material-symbols-outlined text-[44px] text-outline-variant mb-2 block mx-auto">article</span>
+              <h3 class="font-headline-sm text-[17px] font-bold text-on-surface mb-1">Belum ada postingan publik</h3>
+              <p class="font-body-sm text-secondary max-w-sm mx-auto mb-4 leading-relaxed">
+                Jadilah orang pertama yang membagikan pemikiran Anda di Sweeter!
+              </p>
+            </div>
+          `);
+          return;
+        }
+
+        for (let i = 0; i < posts.length; i++) {
+          $('#explore-post-box').append(render_post_card(posts[i], true));
+        }
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal memuat postingan terbaru.');
+    }
+  });
+}
+
+function load_topic_posts(tag, sort) {
+  if (!sort) sort = 'trending';
+  window.currentTopicSort = sort;
+
+  $('#topic-post-box').html(`
+    <div class="text-center text-on-surface-variant py-8 font-body-sm">
+      <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat postingan untuk #${escapeHtml(tag)}…
+    </div>
+  `);
+
+  $.ajax({
+    type: 'GET',
+    url: `/api/tags/${encodeURIComponent(tag)}/posts?sort=${encodeURIComponent(sort)}&limit=25`,
+    success: function (res) {
+      if (res.result === 'success') {
+        let posts = res.posts || [];
+        $('#topic-post-box').empty();
+        if (posts.length === 0) {
+          $('#topic-post-box').html(`
+            <div class="text-center py-12 px-6 bg-surface-container-lowest rounded-xl shadow-sm my-2">
+              <span class="material-symbols-outlined text-[44px] text-outline-variant mb-2 block mx-auto">tag</span>
+              <h3 class="font-headline-sm text-[17px] font-bold text-on-surface mb-1">Belum ada postingan</h3>
+              <p class="font-body-sm text-secondary max-w-sm mx-auto mb-4 leading-relaxed">
+                Belum ada yang membuat postingan dengan hashtag #${escapeHtml(tag)}. Jadilah yang pertama!
+              </p>
+            </div>
+          `);
+          return;
+        }
+
+        for (let i = 0; i < posts.length; i++) {
+          $('#topic-post-box').append(render_post_card(posts[i], true));
+        }
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal memuat postingan topik.');
+    }
+  });
+}
+
+function switch_topic_sort(tag, sort) {
+  $('.topic-tab').removeClass('text-primary font-bold').addClass('text-on-surface-variant font-medium');
+  $('.topic-tab .tab-indicator').addClass('hidden');
+
+  let $activeBtn = $(`#topic-tab-${sort}`);
+  $activeBtn.removeClass('text-on-surface-variant font-medium').addClass('text-primary font-bold');
+  $activeBtn.find('.tab-indicator').removeClass('hidden');
+
+  load_topic_posts(tag, sort);
+}
+
+function toggle_follow_simple(targetUsername, btnElement) {
+  let $btn = $(btnElement);
+  let isFollowing = $btn.text().trim().toLowerCase() === 'following';
+  let endpoint = isFollowing ? `/api/users/${encodeURIComponent(targetUsername)}/unfollow` : `/api/users/${encodeURIComponent(targetUsername)}/follow`;
+
+  $btn.prop('disabled', true);
+
+  $.ajax({
+    type: 'POST',
+    url: endpoint,
+    success: function (res) {
+      if (res.result === 'success') {
+        if (res.is_following) {
+          $btn.removeClass('bg-primary-container text-on-primary hover:bg-primary')
+              .addClass('bg-surface-container-high text-on-surface hover:bg-error-container hover:text-error')
+              .text('Following');
+        } else {
+          $btn.removeClass('bg-surface-container-high text-on-surface hover:bg-error-container hover:text-error')
+              .addClass('bg-primary-container text-on-primary hover:bg-primary')
+              .text('Follow');
+        }
+      } else {
+        alert(res.msg || 'Gagal mengubah status pertemanan.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal mengubah status pertemanan.');
+    },
+    complete: function () {
+      $btn.prop('disabled', false);
+    }
+  });
+}
+
+function execute_explore_search(query) {
+  query = (query || '').trim();
+  if (!query) {
+    $('#search-results-section').addClass('hidden');
+    // Restore current active tab
+    switch_explore_tab(window.currentExploreTab || 'trending');
+    return;
+  }
+
+  $('#search-query-display').text(`"${query}"`);
+  $('#search-results-section').removeClass('hidden');
+  $('#period-chips-container').addClass('hidden');
+  $('#explore-post-box').addClass('hidden');
+  $('#explore-topics-box').addClass('hidden');
+  $('#explore-people-box').addClass('hidden');
+
+  $('#search-hashtags-box').addClass('hidden');
+  $('#search-users-box').addClass('hidden');
+  $('#search-posts-box').html(`
+    <div class="text-center text-on-surface-variant py-8 font-body-sm">
+      <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Mencari...
+    </div>
+  `);
+
+  $.ajax({
+    type: 'GET',
+    url: `/api/search?q=${encodeURIComponent(query)}&limit=20`,
+    success: function (res) {
+      if (res.result === 'success') {
+        let hashtags = res.hashtags || [];
+        let users = res.users || [];
+        let posts = res.posts || [];
+
+        // 1. Render Hashtags
+        if (hashtags.length > 0) {
+          let tagHtml = '';
+          for (let i = 0; i < hashtags.length; i++) {
+            let t = hashtags[i];
+            tagHtml += `
+              <a href="${t.url}" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-secondary-container/60 hover:bg-secondary-container text-primary font-label-md text-label-md no-underline transition-colors">
+                <span>${escapeHtml(t.display_tag)}</span>
+                <span class="text-[11px] text-on-surface-variant">(${t.post_count})</span>
+              </a>
+            `;
+          }
+          $('#search-hashtags-list').html(tagHtml);
+          $('#search-hashtags-box').removeClass('hidden');
+        } else {
+          $('#search-hashtags-box').addClass('hidden');
+        }
+
+        // 2. Render Users
+        if (users.length > 0) {
+          let userHtml = '';
+          for (let i = 0; i < users.length; i++) {
+            let u = users[i];
+            let avatarUrl = sanitizeAvatarUrl(u.profile_pic_real);
+            let followBtn = '';
+            if (!u.is_mine) {
+              let btnClass = u.is_following
+                ? 'bg-surface-container-high text-on-surface hover:bg-error-container hover:text-error'
+                : 'bg-primary-container text-on-primary hover:bg-primary';
+              let btnText = u.is_following ? 'Following' : 'Follow';
+              followBtn = `
+                <button type="button"
+                        class="px-3.5 py-1 rounded-full ${btnClass} font-label-sm text-label-sm transition-all border-0 cursor-pointer shrink-0"
+                        onclick="toggle_follow_simple('${escapeHtml(u.username)}', this)">
+                  ${btnText}
+                </button>
+              `;
+            }
+            userHtml += `
+              <div class="py-2.5 first:pt-0 last:pb-0 flex items-center justify-between gap-3">
+                <a href="/user/${encodeURIComponent(u.username)}" class="flex items-center gap-3 min-w-0 no-underline text-inherit group">
+                  <img src="${avatarUrl}" class="w-10 h-10 rounded-full object-cover shrink-0" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+                  <div class="flex flex-col min-w-0">
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                      <span class="font-label-md font-bold text-on-surface group-hover:underline truncate">${escapeHtml(u.profile_name)}</span>
+                      <span class="font-caption text-on-surface-variant truncate">@${escapeHtml(u.username)}</span>
+                    </div>
+                    <span class="font-caption text-on-surface-variant">${u.follower_count || 0} followers</span>
+                  </div>
+                </a>
+                ${followBtn}
+              </div>
+            `;
+          }
+          $('#search-users-list').html(userHtml);
+          $('#search-users-box').removeClass('hidden');
+        } else {
+          $('#search-users-box').addClass('hidden');
+        }
+
+        // 3. Render Posts
+        $('#search-posts-box').empty();
+        if (posts.length > 0) {
+          for (let i = 0; i < posts.length; i++) {
+            $('#search-posts-box').append(render_post_card(posts[i], true));
+          }
+        }
+
+        // If all 3 empty:
+        if (hashtags.length === 0 && users.length === 0 && posts.length === 0) {
+          $('#search-posts-box').html(`
+            <div class="text-center py-12 px-6 bg-surface-container-lowest rounded-xl shadow-sm my-2">
+              <span class="material-symbols-outlined text-[44px] text-outline-variant mb-2 block mx-auto">search_off</span>
+              <h3 class="font-headline-sm text-[17px] font-bold text-on-surface mb-1">Tidak ada hasil ditemukan</h3>
+              <p class="font-body-sm text-secondary max-w-sm mx-auto mb-4 leading-relaxed">
+                Tidak ada topik, pengguna, atau postingan yang cocok dengan "${escapeHtml(query)}".
+              </p>
+            </div>
+          `);
+        }
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal melakukan pencarian.');
+    }
+  });
+}
