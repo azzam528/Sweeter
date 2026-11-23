@@ -65,6 +65,30 @@ def create_notification(
         if existing:
             return str(existing['_id'])
 
+    # 4. Deduplikasi Repost: jika notifikasi repost unread dari actor pada post_id ini sudah ada
+    elif notif_type == 'repost':
+        existing = db.notifications.find_one({
+            'recipient': recipient,
+            'actor': actor,
+            'type': 'repost',
+            'post_id': post_id,
+            'is_read': False
+        })
+        if existing:
+            return str(existing['_id'])
+
+    # 5. Deduplikasi Quote: jika notifikasi quote unread dari actor pada post_id ini sudah ada
+    elif notif_type == 'quote':
+        existing = db.notifications.find_one({
+            'recipient': recipient,
+            'actor': actor,
+            'type': 'quote',
+            'post_id': post_id,
+            'is_read': False
+        })
+        if existing:
+            return str(existing['_id'])
+
     # Generate pesan default jika tidak disertakan
     if not message:
         if notif_type == 'follow':
@@ -82,6 +106,10 @@ def create_notification(
             message = "mengomentari postingan Anda."
         elif notif_type == 'reply':
             message = "membalas komentar Anda."
+        elif notif_type == 'repost':
+            message = "merepost postingan Anda."
+        elif notif_type == 'quote':
+            message = "mengutip postingan Anda."
         else:
             message = "berinteraksi dengan akun Anda."
 

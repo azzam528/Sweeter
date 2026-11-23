@@ -20,7 +20,7 @@ from flask import (
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
-from database import db, check_connection
+from database import db, check_connection, is_reposted, count_reposts
 from notifications import (
     create_notification,
     get_unread_count,
@@ -378,71 +378,122 @@ def enrich_posts_metadata(posts, current_username):
     2. Batch reactions count (heart, stars, thumbs)
     3. Status reaksi pengguna saat ini (heart_by_me, stars_by_me, thumbs_by_me)
     4. Status bookmark pengguna saat ini (is_bookmarked)
-    5. Hak akses kepemilikan postingan (is_mine)
-    6. Indikator editan postingan (is_edited)
+    5. Status repost pengguna saat ini (repost_by_me)
+    6. Batch repost count (count_repost)
+    7. Hak akses kepemilikan postingan (is_mine)
+    8. Indikator editan postingan (is_edited)
+    9. Resolusi postingan asli untuk repost dan quote posts (original_post)
     """
     post_ids = [str(post['_id']) for post in posts]
+
+    # Kumpulkan juga ID postingan asli dari postingan quote / repost
+    orig_post_ids = [
+        str(post['original_post_id'])
+        for post in posts
+        if post.get('original_post_id') and ObjectId.is_valid(post.get('original_post_id'))
+    ]
+    all_query_ids = list(set(post_ids + orig_post_ids))
+
     comment_counts = {}
     heart_counts = {}
     stars_counts = {}
     thumbs_counts = {}
+    repost_counts = {}
     my_hearts = set()
     my_stars = set()
     my_thumbs = set()
     my_bookmarks = set()
+    my_reposts = set()
+    orig_posts_map = {}
 
-    if post_ids:
-        # Batch count komentar
+    if all_query_ids:
+        # 1. Ambil dokumen postingan asli untuk repost dan quote
+        if orig_post_ids:
+            orig_obj_ids = [ObjectId(pid) for pid in set(orig_post_ids)]
+            for op in db.posts.find({'_id': {'$in': orig_obj_ids}}):
+                orig_posts_map[str(op['_id'])] = op
+
+        # 2. Batch count komentar
         pipeline_comments = [
-            {'$match': {'post_id': {'$in': post_ids}}},
+            {'$match': {'post_id': {'$in': all_query_ids}}},
             {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
         ]
         for item in db.comments.aggregate(pipeline_comments):
             comment_counts[item['_id']] = item['count']
 
-        # Batch count reactions
+        # 3. Batch count reactions
         for item in db.likes.aggregate([
-            {'$match': {'post_id': {'$in': post_ids}, 'type': 'heart'}},
+            {'$match': {'post_id': {'$in': all_query_ids}, 'type': 'heart'}},
             {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
         ]):
             heart_counts[item['_id']] = item['count']
 
         for item in db.stars.aggregate([
-            {'$match': {'post_id': {'$in': post_ids}, 'type': 'stars'}},
+            {'$match': {'post_id': {'$in': all_query_ids}, 'type': 'stars'}},
             {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
         ]):
             stars_counts[item['_id']] = item['count']
 
         for item in db.thumbs.aggregate([
-            {'$match': {'post_id': {'$in': post_ids}, 'type': 'thumbs'}},
+            {'$match': {'post_id': {'$in': all_query_ids}, 'type': 'thumbs'}},
             {'$group': {'_id': '$post_id', 'count': {'$sum': 1}}}
         ]):
             thumbs_counts[item['_id']] = item['count']
 
+        # 4. Batch count reposts
+        for item in db.posts.aggregate([
+            {'$match': {'original_post_id': {'$in': all_query_ids}, 'post_type': 'repost'}},
+            {'$group': {'_id': '$original_post_id', 'count': {'$sum': 1}}}
+        ]):
+            repost_counts[item['_id']] = item['count']
+
+        # 5. Status pengguna saat ini
         if current_username:
             my_hearts = set(db.likes.distinct('post_id', {
-                'post_id': {'$in': post_ids},
+                'post_id': {'$in': all_query_ids},
                 'type': 'heart',
                 'username': current_username
             }))
             my_stars = set(db.stars.distinct('post_id', {
-                'post_id': {'$in': post_ids},
+                'post_id': {'$in': all_query_ids},
                 'type': 'stars',
                 'username': current_username
             }))
             my_thumbs = set(db.thumbs.distinct('post_id', {
-                'post_id': {'$in': post_ids},
+                'post_id': {'$in': all_query_ids},
                 'type': 'thumbs',
                 'username': current_username
             }))
             my_bookmarks = set(db.bookmarks.distinct('post_id', {
-                'post_id': {'$in': post_ids},
+                'post_id': {'$in': all_query_ids},
                 'username': current_username
             }))
+            my_reposts = set(db.posts.distinct('original_post_id', {
+                'original_post_id': {'$in': all_query_ids},
+                'post_type': 'repost',
+                'username': current_username
+            }))
+
+    # Enrich original posts map first so nested objects have full counts
+    for opid, op in orig_posts_map.items():
+        op['_id'] = opid
+        op['count_heart'] = heart_counts.get(opid, 0)
+        op['heart_by_me'] = opid in my_hearts
+        op['count_stars'] = stars_counts.get(opid, 0)
+        op['stars_by_me'] = opid in my_stars
+        op['count_thumbs'] = thumbs_counts.get(opid, 0)
+        op['thumbs_by_me'] = opid in my_thumbs
+        op['count_comments'] = comment_counts.get(opid, 0)
+        op['count_repost'] = repost_counts.get(opid, 0)
+        op['repost_by_me'] = opid in my_reposts
+        op['is_bookmarked'] = opid in my_bookmarks
+        op['is_mine'] = (op.get('username') == current_username)
+        op['is_edited'] = bool(op.get('is_edited', False))
 
     for post in posts:
         pid = str(post['_id'])
         post['_id'] = pid
+        post['post_type'] = post.get('post_type', 'original')
         post['count_heart'] = heart_counts.get(pid, 0)
         post['heart_by_me'] = pid in my_hearts
         post['count_stars'] = stars_counts.get(pid, 0)
@@ -450,9 +501,20 @@ def enrich_posts_metadata(posts, current_username):
         post['count_thumbs'] = thumbs_counts.get(pid, 0)
         post['thumbs_by_me'] = pid in my_thumbs
         post['count_comments'] = comment_counts.get(pid, 0)
+        post['count_repost'] = repost_counts.get(pid, 0)
+        post['repost_by_me'] = pid in my_reposts
         post['is_bookmarked'] = pid in my_bookmarks
         post['is_mine'] = (post.get('username') == current_username)
         post['is_edited'] = bool(post.get('is_edited', False))
+
+        if post.get('original_post_id'):
+            orig_id = str(post['original_post_id'])
+            if orig_id in orig_posts_map:
+                post['original_post'] = dict(orig_posts_map[orig_id])
+            else:
+                post['original_post'] = {'_id': orig_id, 'is_deleted': True}
+        else:
+            post['original_post'] = None
 
     return posts
 
@@ -1723,6 +1785,7 @@ def delete_post_endpoint(post_id=None):
     db.stars.delete_many({'post_id': target_pid})
     db.thumbs.delete_many({'post_id': target_pid})
     db.comments.delete_many({'post_id': target_pid})
+    db.posts.delete_many({'original_post_id': target_pid, 'post_type': 'repost'})
     cleanup_notifications_for_post(target_pid)
 
     return jsonify({
@@ -1730,6 +1793,231 @@ def delete_post_endpoint(post_id=None):
         'msg': 'Post deleted successfully',
         'post_id': target_pid
     }), 200  
+
+
+@app.route('/api/posts/<post_id>/repost', methods=['POST'])
+@app.route('/api/repost', methods=['POST'])
+def repost_post(post_id=None):
+    """
+    Endpoint untuk melakukan repost postingan pengguna lain.
+    Mencegah self-repost (400) dan duplicate repost (409).
+    Mengirimkan notifikasi ke pembuat postingan asli.
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    target_pid = _extract_post_id(post_id)
+    if not target_pid:
+        return jsonify({'result': 'fail', 'msg': 'Post ID is required'}), 400
+
+    if not ObjectId.is_valid(target_pid):
+        return jsonify({'result': 'fail', 'msg': 'Invalid post ID format'}), 400
+
+    post_doc = db.posts.find_one({'_id': ObjectId(target_pid)})
+    if not post_doc:
+        return jsonify({'result': 'fail', 'msg': 'Post not found'}), 404
+
+    # Jika target adalah repost, arahkan ke postingan asli
+    actual_pid = target_pid
+    actual_post = post_doc
+    if post_doc.get('post_type') == 'repost' and post_doc.get('original_post_id'):
+        actual_pid = post_doc.get('original_post_id')
+        actual_post = db.posts.find_one({'_id': ObjectId(actual_pid)})
+        if not actual_post:
+            return jsonify({'result': 'fail', 'msg': 'Original post not found'}), 404
+
+    # Cegah repost postingan milik sendiri
+    if actual_post.get('username') == current_username:
+        return jsonify({'result': 'fail', 'msg': 'Cannot repost your own post'}), 400
+
+    # Cegah duplicate repost
+    existing = db.posts.find_one({
+        'username': current_username,
+        'original_post_id': actual_pid,
+        'post_type': 'repost'
+    })
+    if existing:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Post already reposted',
+            'is_reposted': True,
+            'count_repost': count_reposts(actual_pid),
+            'post_id': actual_pid
+        }), 409
+
+    user_info = db.users.find_one({'username': current_username}) or {}
+    now = datetime.now(timezone.utc).isoformat()
+    repost_doc = {
+        'username': current_username,
+        'profile_name': user_info.get('profile_name', current_username),
+        'profile_pic_real': user_info.get('profile_pic_real', 'profile_pics/profile_placeholder.png'),
+        'date': now,
+        'post_type': 'repost',
+        'original_post_id': actual_pid,
+        'comment': ''
+    }
+
+    try:
+        db.posts.insert_one(repost_doc)
+    except DuplicateKeyError:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Post already reposted',
+            'is_reposted': True,
+            'count_repost': count_reposts(actual_pid),
+            'post_id': actual_pid
+        }), 409
+
+    # Kirim notifikasi ke pemilik postingan asli
+    create_notification(
+        recipient=actual_post.get('username'),
+        actor=current_username,
+        notif_type='repost',
+        post_id=actual_pid
+    )
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Post reposted successfully',
+        'is_reposted': True,
+        'count_repost': count_reposts(actual_pid),
+        'post_id': actual_pid
+    }), 200
+
+
+@app.route('/api/posts/<post_id>/unrepost', methods=['POST'])
+@app.route('/api/unrepost', methods=['POST'])
+def unrepost_post(post_id=None):
+    """
+    Endpoint untuk membatalkan repost suatu postingan.
+    Bersifat idempotent dan aman jika repost tidak ditemukan.
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    target_pid = _extract_post_id(post_id)
+    if not target_pid:
+        return jsonify({'result': 'fail', 'msg': 'Post ID is required'}), 400
+
+    if not ObjectId.is_valid(target_pid):
+        return jsonify({'result': 'fail', 'msg': 'Invalid post ID format'}), 400
+
+    post_doc = db.posts.find_one({'_id': ObjectId(target_pid)})
+    actual_pid = target_pid
+    if post_doc and post_doc.get('post_type') == 'repost' and post_doc.get('original_post_id'):
+        actual_pid = post_doc.get('original_post_id')
+
+    # Hapus dokumen repost oleh pengguna ini
+    db.posts.delete_many({
+        'username': current_username,
+        'original_post_id': actual_pid,
+        'post_type': 'repost'
+    })
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Repost removed successfully',
+        'is_reposted': False,
+        'count_repost': count_reposts(actual_pid),
+        'post_id': actual_pid
+    }), 200
+
+
+@app.route('/api/posts/<post_id>/quote', methods=['POST'])
+@app.route('/api/quote', methods=['POST'])
+def quote_post(post_id=None):
+    """
+    Endpoint untuk membuat quote post (membagikan postingan dengan komentar sendiri).
+    Validasi batas panjang komentar (1-5000 karakter).
+    Mengirimkan notifikasi quote ke pembuat postingan asli.
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    target_pid = _extract_post_id(post_id)
+    if not target_pid:
+        return jsonify({'result': 'fail', 'msg': 'Post ID is required'}), 400
+
+    if not ObjectId.is_valid(target_pid):
+        return jsonify({'result': 'fail', 'msg': 'Invalid post ID format'}), 400
+
+    post_doc = db.posts.find_one({'_id': ObjectId(target_pid)})
+    if not post_doc:
+        return jsonify({'result': 'fail', 'msg': 'Post not found'}), 404
+
+    actual_pid = target_pid
+    actual_post = post_doc
+    if post_doc.get('post_type') == 'repost' and post_doc.get('original_post_id'):
+        actual_pid = post_doc.get('original_post_id')
+        actual_post = db.posts.find_one({'_id': ObjectId(actual_pid)})
+        if not actual_post:
+            return jsonify({'result': 'fail', 'msg': 'Original post not found'}), 404
+
+    # Ambil komentar kutipan dari JSON atau form-data
+    content = None
+    if request.is_json:
+        content = (request.get_json(silent=True) or {}).get('comment')
+    if not content:
+        content = request.form.get('comment_give') or request.form.get('comment')
+
+    if not content or not isinstance(content, str) or not content.strip():
+        return jsonify({'result': 'fail', 'msg': 'Quote comment cannot be empty'}), 400
+
+    content = content.strip()
+    if len(content) > 5000:
+        return jsonify({'result': 'fail', 'msg': 'Quote comment exceeds maximum length'}), 400
+
+    user_info = db.users.find_one({'username': current_username}) or {}
+    now = datetime.now(timezone.utc).isoformat()
+    quote_doc = {
+        'username': current_username,
+        'profile_name': user_info.get('profile_name', current_username),
+        'profile_pic_real': user_info.get('profile_pic_real', 'profile_pics/profile_placeholder.png'),
+        'comment': content,
+        'date': now,
+        'post_type': 'quote',
+        'original_post_id': actual_pid
+    }
+
+    res = db.posts.insert_one(quote_doc)
+    new_quote_id = str(res.inserted_id)
+
+    # Kirim notifikasi quote ke pembuat postingan asli
+    create_notification(
+        recipient=actual_post.get('username'),
+        actor=current_username,
+        notif_type='quote',
+        post_id=actual_pid
+    )
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Quote post created successfully',
+        'post_id': new_quote_id,
+        'original_post_id': actual_pid,
+        'comment': content
+    }), 201  
 
 if __name__ == "__main__":
     app.run('0.0.0.0', port=5000, debug=True)

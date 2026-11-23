@@ -497,5 +497,42 @@
   });
 </script>
 
+<!-- Quote Post Modal -->
+<div id="quote-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+  <div class="bg-surface-container-lowest rounded-2xl w-full max-w-lg shadow-xl border border-outline-variant/30 overflow-hidden flex flex-col max-h-[90vh]">
+    <div class="flex items-center justify-between px-5 py-3.5 border-b border-surface-container-high">
+      <h3 class="font-headline-sm text-[17px] font-bold text-on-surface m-0">Kutip Postingan</h3>
+      <button type="button" onclick="close_quote_modal()" class="p-1 rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors border-0 bg-transparent cursor-pointer">
+        <span class="material-symbols-outlined text-[20px]">close</span>
+      </button>
+    </div>
+    <div class="p-5 overflow-y-auto flex-1">
+      <input type="hidden" id="quote-target-id" value="" />
+      <textarea id="quote-textarea"
+                class="w-full bg-surface-container-low rounded-xl p-3 font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary-container resize-none transition-all"
+                rows="3"
+                maxlength="5000"
+                placeholder="Tambahkan komentar Anda..."></textarea>
+      
+      <div id="quote-preview-card" class="mt-3 p-3.5 rounded-xl border border-outline-variant/50 bg-surface-container-low/60">
+        <div class="flex items-center gap-2 mb-1.5">
+          <img id="quote-preview-avatar" class="w-6 h-6 rounded-full object-cover shrink-0" src="/static/profile_pics/profile_placeholder.png" alt=""/>
+          <span id="quote-preview-name" class="font-label-sm font-semibold text-on-surface"></span>
+          <span id="quote-preview-username" class="font-caption text-on-surface-variant"></span>
+        </div>
+        <p id="quote-preview-comment" class="font-body-sm text-on-surface whitespace-pre-wrap leading-relaxed line-clamp-3 m-0"></p>
+      </div>
+    </div>
+    <div class="flex items-center justify-end gap-2 px-5 py-3 border-t border-surface-container-high bg-surface-container-low/30">
+      <button type="button" onclick="close_quote_modal()" class="px-4 py-1.5 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container-high transition-colors border-0 bg-transparent cursor-pointer">
+        Batal
+      </button>
+      <button type="button" id="btn-submit-quote" onclick="submit_quote_post()" class="px-5 py-1.5 rounded-full bg-primary-container text-on-primary font-label-md text-label-md hover:bg-primary transition-colors border-0 cursor-pointer shadow-sm">
+        Kirim Kutipan
+      </button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

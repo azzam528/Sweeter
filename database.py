@@ -67,6 +67,14 @@ def init_indexes():
         db.notifications.create_index([("recipient", 1), ("actor", 1), ("type", 1), ("post_id", 1)])
         # 18. Single index pada post_id untuk cascading cleanup notifikasi saat post dihapus
         db.notifications.create_index([("post_id", 1)])
+        # 19. Single index pada original_post_id untuk pencarian relasi repost & quote
+        db.posts.create_index([("original_post_id", 1)])
+        # 20. Compound unique index untuk mencegah duplikasi repost oleh pengguna yang sama
+        db.posts.create_index(
+            [("username", 1), ("original_post_id", 1), ("post_type", 1)],
+            unique=True,
+            partialFilterExpression={"post_type": "repost"}
+        )
     except Exception as e:
         print(f"Warning saat inisialisasi index MongoDB: {e}")
 
@@ -114,3 +122,24 @@ def count_bookmarks(username: str) -> int:
     if not username:
         return 0
     return db.bookmarks.count_documents({"username": username})
+
+
+def is_reposted(username: str, post_id: str) -> bool:
+    """Memeriksa apakah pengguna telah merepost postingan ini."""
+    if not username or not post_id:
+        return False
+    return bool(db.posts.find_one({
+        'username': username,
+        'original_post_id': str(post_id),
+        'post_type': 'repost'
+    }))
+
+
+def count_reposts(post_id: str) -> int:
+    """Menghitung jumlah repost dari suatu postingan."""
+    if not post_id:
+        return 0
+    return db.posts.count_documents({
+        'original_post_id': str(post_id),
+        'post_type': 'repost'
+    })

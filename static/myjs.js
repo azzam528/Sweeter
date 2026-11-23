@@ -159,16 +159,17 @@ function load_more_posts() {
 // --- Post Card Renderer (Stitch & Bulma) ---
 
 function render_post_card(post, isStitch) {
+  window.postsCache = window.postsCache || {};
+  window.postsCache[post['_id']] = post;
+  if (post['original_post'] && post['original_post']['_id']) {
+    window.postsCache[post['original_post']['_id']] = post['original_post'];
+  }
+
+  let post_type = post['post_type'] || 'original';
+  let orig = post['original_post'];
+
   let time_post = new Date(post['date']);
   let time_before = time2str(time_post);
-  let class_heart = post['heart_by_me'] ? 'fa-heart' : 'fa-heart-o';
-  let class_stars = post['stars_by_me'] ? 'fa-star' : 'fa-star-o';
-  let class_thumbs = post['thumbs_by_me'] ? 'fa-thumbs-up' : 'fa-thumbs-o-up';
-
-  let count_comments = (post['count_comments'] !== undefined && post['count_comments'] !== null)
-    ? post['count_comments']
-    : 0;
-  let display_comment_num = count_comments > 0 ? num2str(count_comments) : '0';
 
   let avatar_url = sanitizeAvatarUrl(post['profile_pic_real']);
   let profile_name_escaped = escapeHtml(post['profile_name']);
@@ -179,34 +180,150 @@ function render_post_card(post, isStitch) {
   let is_mine = Boolean(post['is_mine']);
   let is_bookmarked = Boolean(post['is_bookmarked']);
 
+  let class_heart = post['heart_by_me'] ? 'fa-heart' : 'fa-heart-o';
+  let class_stars = post['stars_by_me'] ? 'fa-star' : 'fa-star-o';
+  let class_thumbs = post['thumbs_by_me'] ? 'fa-thumbs-up' : 'fa-thumbs-o-up';
+
+  let count_heart = post['count_heart'] || 0;
+  let count_stars = post['count_stars'] || 0;
+  let count_thumbs = post['count_thumbs'] || 0;
+  let count_repost = post['count_repost'] || 0;
+  let repost_by_me = Boolean(post['repost_by_me']);
+
+  let count_comments = (post['count_comments'] !== undefined && post['count_comments'] !== null)
+    ? post['count_comments']
+    : 0;
+  let display_comment_num = count_comments > 0 ? num2str(count_comments) : '0';
+
+  let target_post_id = post['_id'];
+  let repost_banner_stitch = '';
+  let repost_banner_bulma = '';
+  let quote_embed_stitch = '';
+  let quote_embed_bulma = '';
+
+  if (post_type === 'repost') {
+    repost_banner_stitch = `
+      <div class="flex items-center gap-1.5 text-on-surface-variant font-label-sm text-label-sm mb-2 pb-1 border-b border-surface-container-high/40">
+        <i class="fa fa-retweet text-primary text-[14px]"></i>
+        <a href="/user/${encodeURIComponent(post['username'])}" class="font-semibold text-on-surface hover:underline no-underline text-inherit">${profile_name_escaped}</a>
+        <span>merepost</span>
+      </div>
+    `;
+    repost_banner_bulma = `
+      <div class="is-flex is-align-items-center mb-2 pb-1" style="border-bottom: 1px solid #f0f0f0; color: #7a7a7a; font-size: 0.8rem;">
+        <span class="icon is-small mr-1"><i class="fa fa-retweet has-text-primary"></i></span>
+        <a href="/user/${encodeURIComponent(post['username'])}" class="has-text-weight-semibold mr-1">${profile_name_escaped}</a>
+        <span>merepost</span>
+      </div>
+    `;
+
+    if (orig && !orig.is_deleted) {
+      target_post_id = orig['_id'];
+      avatar_url = sanitizeAvatarUrl(orig['profile_pic_real']);
+      profile_name_escaped = escapeHtml(orig['profile_name']);
+      username_escaped = escapeHtml(orig['username']);
+      comment_escaped = escapeHtml(orig['comment']);
+      time_before = time2str(new Date(orig['date']));
+      is_edited = Boolean(orig['is_edited']);
+
+      class_heart = orig['heart_by_me'] ? 'fa-heart' : 'fa-heart-o';
+      count_heart = orig['count_heart'] || 0;
+      class_stars = orig['stars_by_me'] ? 'fa-star' : 'fa-star-o';
+      count_stars = orig['count_stars'] || 0;
+      class_thumbs = orig['thumbs_by_me'] ? 'fa-thumbs-up' : 'fa-thumbs-o-up';
+      count_thumbs = orig['count_thumbs'] || 0;
+      count_comments = (orig['count_comments'] !== undefined && orig['count_comments'] !== null) ? orig['count_comments'] : 0;
+      display_comment_num = count_comments > 0 ? num2str(count_comments) : '0';
+      count_repost = orig['count_repost'] || 0;
+      repost_by_me = Boolean(orig['repost_by_me']);
+      is_bookmarked = Boolean(orig['is_bookmarked']);
+    } else {
+      comment_escaped = '<span class="italic text-on-surface-variant font-body-sm">Postingan asli telah dihapus atau tidak tersedia.</span>';
+    }
+  } else if (post_type === 'quote') {
+    target_post_id = post['_id'];
+    if (!orig || orig.is_deleted) {
+      quote_embed_stitch = `
+        <div class="mt-2 mb-space-md p-3.5 rounded-xl border border-outline-variant/50 bg-surface-container-low text-on-surface-variant font-body-sm italic flex items-center gap-2">
+          <span class="material-symbols-outlined text-[18px] text-outline">info</span>
+          <span>Postingan asli telah dihapus atau tidak tersedia.</span>
+        </div>
+      `;
+      quote_embed_bulma = `
+        <div class="notification is-light p-3 mt-2 mb-3" style="border: 1px solid #dbdbdb; border-radius: 8px;">
+          <span class="icon is-small mr-1"><i class="fa fa-info-circle"></i></span>
+          <span class="is-italic is-size-7">Postingan asli telah dihapus atau tidak tersedia.</span>
+        </div>
+      `;
+    } else {
+      quote_embed_stitch = `
+        <div class="mt-2 mb-space-md p-3.5 rounded-xl border border-outline-variant/60 bg-surface-container-low/60 hover:bg-surface-container-low transition-colors cursor-pointer" onclick="window.location.href='/user/${encodeURIComponent(orig.username)}#${orig._id}'">
+          <div class="flex items-center gap-2 mb-1.5">
+            <img src="${sanitizeAvatarUrl(orig.profile_pic_real)}" alt="${escapeHtml(orig.profile_name)}" class="w-5 h-5 rounded-full object-cover shrink-0" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+            <span class="font-label-sm font-semibold text-on-surface">${escapeHtml(orig.profile_name)}</span>
+            <span class="font-caption text-on-surface-variant">@${escapeHtml(orig.username)}</span>
+            <span class="font-caption text-on-surface-variant">·</span>
+            <span class="font-caption text-on-surface-variant">${time2str(new Date(orig.date))}</span>
+          </div>
+          <p class="font-body-sm text-on-surface whitespace-pre-wrap leading-relaxed m-0 line-clamp-4">${escapeHtml(orig.comment)}</p>
+        </div>
+      `;
+      quote_embed_bulma = `
+        <div class="box is-light p-3 mt-2 mb-3" style="border: 1px solid #dbdbdb; border-radius: 8px; cursor: pointer;" onclick="window.location.href='/user/${encodeURIComponent(orig.username)}#${orig._id}'">
+          <div class="is-flex is-align-items-center mb-1">
+            <figure class="image is-20x20 mr-2">
+              <img class="is-rounded" src="${sanitizeAvatarUrl(orig.profile_pic_real)}" onerror="this.src='/static/profile_pics/profile_placeholder.png'">
+            </figure>
+            <strong class="is-size-7">${escapeHtml(orig.profile_name)}</strong>
+            <small class="has-text-grey ml-1 is-size-7">@${escapeHtml(orig.username)} · ${time2str(new Date(orig.date))}</small>
+          </div>
+          <p class="is-size-7">${escapeHtml(orig.comment)}</p>
+        </div>
+      `;
+    }
+  }
+
   if (isStitch) {
     let edited_badge = is_edited
       ? `<span class="text-on-surface-variant font-caption text-caption italic ml-1 post-edited-indicator" id="edited-badge-${post['_id']}">· edited</span>`
       : `<span class="text-on-surface-variant font-caption text-caption italic ml-1 post-edited-indicator hidden" id="edited-badge-${post['_id']}">· edited</span>`;
 
-    let owner_actions = is_mine
-      ? `
-      <div class="flex items-center gap-space-xs text-on-surface-variant">
-        <button type="button" onclick="open_edit_post('${post['_id']}')" class="p-1 rounded-full hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface border-0 bg-transparent cursor-pointer" title="Edit Post">
-          <span class="material-symbols-outlined text-[18px]">edit</span>
-        </button>
-        <button type="button" onclick="delete_post('${post['_id']}')" class="p-1 rounded-full hover:bg-error-container hover:text-error transition-colors text-on-surface-variant border-0 bg-transparent cursor-pointer" title="Hapus Post">
-          <span class="material-symbols-outlined text-[18px]">delete</span>
-        </button>
-      </div>`
-      : '';
+    let owner_actions = '';
+    if (post_type === 'repost') {
+      if (is_mine) {
+        owner_actions = `
+        <div class="flex items-center gap-space-xs text-on-surface-variant">
+          <button type="button" onclick="delete_post('${post['_id']}')" class="p-1 rounded-full hover:bg-error-container hover:text-error transition-colors text-on-surface-variant border-0 bg-transparent cursor-pointer" title="Hapus Repost">
+            <span class="material-symbols-outlined text-[18px]">delete</span>
+          </button>
+        </div>`;
+      }
+    } else {
+      if (is_mine) {
+        owner_actions = `
+        <div class="flex items-center gap-space-xs text-on-surface-variant">
+          <button type="button" onclick="open_edit_post('${post['_id']}')" class="p-1 rounded-full hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-on-surface border-0 bg-transparent cursor-pointer" title="Edit Post">
+            <span class="material-symbols-outlined text-[18px]">edit</span>
+          </button>
+          <button type="button" onclick="delete_post('${post['_id']}')" class="p-1 rounded-full hover:bg-error-container hover:text-error transition-colors text-on-surface-variant border-0 bg-transparent cursor-pointer" title="Hapus Post">
+            <span class="material-symbols-outlined text-[18px]">delete</span>
+          </button>
+        </div>`;
+      }
+    }
 
     return `
     <article class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm transition-all hover:shadow-md mb-space-md" id="${post['_id']}">
+      ${repost_banner_stitch}
       <!-- Post Header -->
       <div class="flex items-center justify-between mb-space-sm">
         <div class="flex items-center gap-space-sm min-w-0">
-          <a href="/user/${encodeURIComponent(post['username'])}" class="shrink-0">
+          <a href="/user/${encodeURIComponent(post_type === 'repost' && orig ? orig.username : post['username'])}" class="shrink-0">
             <img class="w-10 h-10 rounded-full object-cover shrink-0" src="${avatar_url}" alt="${profile_name_escaped}" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
           </a>
           <div class="flex flex-col min-w-0">
             <div class="flex items-center gap-space-xs">
-              <a href="/user/${encodeURIComponent(post['username'])}" class="font-label-md text-label-md text-on-surface font-semibold truncate hover:underline no-underline text-inherit">${profile_name_escaped}</a>
+              <a href="/user/${encodeURIComponent(post_type === 'repost' && orig ? orig.username : post['username'])}" class="font-label-md text-label-md text-on-surface font-semibold truncate hover:underline no-underline text-inherit">${profile_name_escaped}</a>
             </div>
             <div class="flex items-center gap-space-xs text-on-surface-variant font-caption text-caption">
               <span>@${username_escaped}</span>
@@ -224,55 +341,80 @@ function render_post_card(post, isStitch) {
         ${comment_escaped}
       </p>
 
+      ${quote_embed_stitch}
+
       <!-- Inline Edit Box -->
+      ${post_type !== 'repost' ? `
       <div id="edit-box-${post['_id']}" class="hidden mb-space-md bg-surface-container-low p-space-sm rounded-lg">
         <textarea id="edit-textarea-${post['_id']}" class="w-full bg-surface-container-lowest rounded-lg p-space-sm font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary-container resize-none transition-all" rows="3" maxlength="5000">${comment_escaped}</textarea>
         <div class="flex items-center justify-end gap-space-xs mt-space-xs">
           <button type="button" onclick="cancel_edit_post('${post['_id']}')" class="px-space-sm py-1 font-label-sm text-label-sm text-on-surface-variant hover:bg-surface-container-high rounded-full border-0 bg-transparent cursor-pointer">Batal</button>
           <button type="button" onclick="submit_edit_post('${post['_id']}')" class="px-space-md py-1 bg-primary-container text-on-primary font-label-sm text-label-sm rounded-full hover:bg-primary transition-colors border-0 cursor-pointer btn-save-edit">Simpan</button>
         </div>
-      </div>
+      </div>` : ''}
 
       <!-- Action Counter Toolbar -->
       <div class="flex items-center justify-between text-on-surface-variant font-label-sm text-label-sm mb-space-md pt-space-xs">
         <div class="flex items-center gap-space-md">
-          <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${post['heart_by_me'] ? 'text-primary font-bold' : ''}" aria-label="heart" onclick="toggle_like('${post['_id']}', 'heart')">
+          <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${class_heart === 'fa-heart' ? 'text-primary font-bold' : ''}" aria-label="heart" onclick="toggle_like('${target_post_id}', 'heart')">
             <span class="icon is-small">
               <i class="fa ${class_heart}" aria-hidden="true"></i>
-            </span>&nbsp;<span class="like-num">${post['count_heart']}</span>
+            </span>&nbsp;<span class="like-num">${count_heart}</span>
           </a>
-          <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${post['stars_by_me'] ? 'text-primary font-bold' : ''}" aria-label="stars" onclick="toggle_stars('${post['_id']}', 'stars')">
+          <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${class_stars === 'fa-star' ? 'text-primary font-bold' : ''}" aria-label="stars" onclick="toggle_stars('${target_post_id}', 'stars')">
             <span class="icon is-small">
               <i class="fa ${class_stars}" aria-hidden="true"></i>
-            </span>&nbsp;<span class="star-num">${num2str(post['count_stars'])}</span>
+            </span>&nbsp;<span class="star-num">${num2str(count_stars)}</span>
           </a>
-          <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${post['thumbs_by_me'] ? 'text-primary font-bold' : ''}" aria-label="thumbs" onclick="toggle_thumbs('${post['_id']}', 'thumbs')">
+          <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline ${class_thumbs === 'fa-thumbs-up' ? 'text-primary font-bold' : ''}" aria-label="thumbs" onclick="toggle_thumbs('${target_post_id}', 'thumbs')">
             <span class="icon is-small">
               <i class="fa ${class_thumbs}" aria-hidden="true"></i>
-            </span>&nbsp;<span class="thumbs-num">${num2str(post['count_thumbs'])}</span>
+            </span>&nbsp;<span class="thumbs-num">${num2str(count_thumbs)}</span>
           </a>
-          <a class="flex items-center gap-1 text-primary-container font-semibold btn-toggle-comment cursor-pointer text-inherit no-underline" aria-label="comment" onclick="toggle_comments('${post['_id']}')" title="Komentar">
+
+          <!-- Repost Menu Dropdown Button -->
+          <div class="relative inline-block repost-menu-container">
+            <button type="button" class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline btn-repost border-0 bg-transparent p-0 ${repost_by_me ? 'text-primary font-bold' : ''}" aria-label="repost" onclick="toggle_repost_dropdown('${target_post_id}', event)" title="Repost / Kutip">
+              <span class="icon is-small">
+                <i class="fa fa-retweet ${repost_by_me ? 'text-primary' : ''}" id="repost-icon-${target_post_id}" aria-hidden="true"></i>
+              </span>&nbsp;<span class="repost-num" id="repost-num-${target_post_id}">${num2str(count_repost)}</span>
+            </button>
+            <div id="repost-dropdown-${target_post_id}" class="hidden absolute left-0 bottom-full mb-1 z-30 bg-surface-container-lowest border border-outline-variant/30 rounded-xl shadow-lg py-1.5 w-44 text-left font-label-md text-label-md">
+              <button type="button" class="w-full text-left px-3.5 py-2 hover:bg-surface-container-high transition-colors flex items-center gap-2 border-0 bg-transparent cursor-pointer text-on-surface" onclick="toggle_repost('${target_post_id}'); hide_all_repost_dropdowns();">
+                <i class="fa fa-retweet ${repost_by_me ? 'text-primary' : ''}"></i>
+                <span>${repost_by_me ? 'Batalkan Repost' : 'Repost'}</span>
+              </button>
+              <button type="button" class="w-full text-left px-3.5 py-2 hover:bg-surface-container-high transition-colors flex items-center gap-2 border-0 bg-transparent cursor-pointer text-on-surface" onclick="open_quote_modal('${target_post_id}'); hide_all_repost_dropdowns();">
+                <i class="fa fa-quote-left"></i>
+                <span>Kutip Postingan</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Comments Button -->
+          <a class="flex items-center gap-1 text-primary-container font-semibold btn-toggle-comment cursor-pointer text-inherit no-underline" aria-label="comment" onclick="toggle_comments('${target_post_id}')" title="Komentar">
             <span class="icon is-small">
               <i class="fa fa-comment-o" aria-hidden="true"></i>
             </span>&nbsp;<span class="comment-num" data-count="${count_comments}">${display_comment_num}</span>
           </a>
         </div>
+
         <!-- Bookmark Button -->
-        <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline btn-bookmark ${is_bookmarked ? 'text-primary font-bold' : ''}" aria-label="bookmark" onclick="toggle_bookmark('${post['_id']}')" title="Bookmark">
+        <a class="flex items-center gap-1 group hover:text-primary transition-colors cursor-pointer text-inherit no-underline btn-bookmark ${is_bookmarked ? 'text-primary font-bold' : ''}" aria-label="bookmark" onclick="toggle_bookmark('${target_post_id}')" title="Bookmark">
           <span class="icon is-small">
-            <i class="fa ${is_bookmarked ? 'fa-bookmark text-primary' : 'fa-bookmark-o'}" id="bookmark-icon-${post['_id']}" aria-hidden="true"></i>
+            <i class="fa ${is_bookmarked ? 'fa-bookmark text-primary' : 'fa-bookmark-o'}" id="bookmark-icon-${target_post_id}" aria-hidden="true"></i>
           </span>
         </a>
       </div>
 
       <!-- Container Komentar (Collapsible) -->
-      <div class="comment-section is-hidden bg-surface-container-low rounded-lg p-space-md mt-space-sm" id="comments-section-${post['_id']}">
+      <div class="comment-section is-hidden bg-surface-container-low rounded-lg p-space-md mt-space-sm" id="comments-section-${target_post_id}">
         <!-- Form Input Komentar Utama -->
         <div class="comment-form mb-3">
           <div class="flex items-center gap-space-sm">
             <div class="flex-1 relative flex items-center">
-              <input class="w-full bg-surface-container-lowest rounded-full py-space-xs pl-space-md pr-20 font-body-sm text-body-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary-container comment-input" id="input-comment-${post['_id']}" type="text" placeholder="Tulis komentar..." maxlength="2000" onkeydown="if(event.key==='Enter'){submit_comment('${post['_id']}');}" />
-              <button class="absolute right-1 px-space-sm py-1 bg-primary-container text-on-primary font-label-sm text-label-sm rounded-full hover:bg-primary transition-colors btn-submit-comment border-0 cursor-pointer" onclick="submit_comment('${post['_id']}')">
+              <input class="w-full bg-surface-container-lowest rounded-full py-space-xs pl-space-md pr-20 font-body-sm text-body-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary-container comment-input" id="input-comment-${target_post_id}" type="text" placeholder="Tulis komentar..." maxlength="2000" onkeydown="if(event.key==='Enter'){submit_comment('${target_post_id}');}" />
+              <button class="absolute right-1 px-space-sm py-1 bg-primary-container text-on-primary font-label-sm text-label-sm rounded-full hover:bg-primary transition-colors btn-submit-comment border-0 cursor-pointer" onclick="submit_comment('${target_post_id}')">
                 Reply
               </button>
             </div>
@@ -280,7 +422,7 @@ function render_post_card(post, isStitch) {
         </div>
 
         <!-- Container List Komentar (Tree) -->
-        <div class="comment-list" id="comments-list-${post['_id']}"></div>
+        <div class="comment-list" id="comments-list-${target_post_id}"></div>
       </div>
     </article>
     `;
@@ -289,19 +431,30 @@ function render_post_card(post, isStitch) {
       ? `<small class="has-text-grey-light is-italic ml-1 post-edited-indicator" id="edited-badge-${post['_id']}">· edited</small>`
       : `<small class="has-text-grey-light is-italic ml-1 post-edited-indicator is-hidden" id="edited-badge-${post['_id']}">· edited</small>`;
 
-    let owner_actions_bulma = is_mine
-      ? `
-      <div class="media-right">
-        <button type="button" class="button is-small is-white" onclick="open_edit_post('${post['_id']}')" title="Edit"><i class="fa fa-pencil"></i></button>
-        <button type="button" class="button is-small is-white has-text-danger" onclick="delete_post('${post['_id']}')" title="Hapus"><i class="fa fa-trash"></i></button>
-      </div>`
-      : '';
+    let owner_actions_bulma = '';
+    if (post_type === 'repost') {
+      if (is_mine) {
+        owner_actions_bulma = `
+        <div class="media-right">
+          <button type="button" class="button is-small is-white has-text-danger" onclick="delete_post('${post['_id']}')" title="Hapus Repost"><i class="fa fa-trash"></i></button>
+        </div>`;
+      }
+    } else {
+      if (is_mine) {
+        owner_actions_bulma = `
+        <div class="media-right">
+          <button type="button" class="button is-small is-white" onclick="open_edit_post('${post['_id']}')" title="Edit"><i class="fa fa-pencil"></i></button>
+          <button type="button" class="button is-small is-white has-text-danger" onclick="delete_post('${post['_id']}')" title="Hapus"><i class="fa fa-trash"></i></button>
+        </div>`;
+      }
+    }
 
     return `
     <div class="box" id="${post['_id']}">
+      ${repost_banner_bulma}
       <article class="media">
         <div class="media-left">
-          <a class="image is-64x64" href="/user/${encodeURIComponent(post['username'])}">
+          <a class="image is-64x64" href="/user/${encodeURIComponent(post_type === 'repost' && orig ? orig.username : post['username'])}">
             <img class="is-rounded" src="${avatar_url}" alt="${profile_name_escaped}"/>
           </a>
         </div>
@@ -314,56 +467,77 @@ function render_post_card(post, isStitch) {
               <br/>
               ${comment_escaped}
             </p>
+            ${quote_embed_bulma}
+            ${post_type !== 'repost' ? `
             <div id="edit-box-${post['_id']}" class="is-hidden mb-3">
               <textarea id="edit-textarea-${post['_id']}" class="textarea is-small" rows="3" maxlength="5000">${comment_escaped}</textarea>
               <div class="buttons is-right mt-1">
                 <button type="button" class="button is-small is-light" onclick="cancel_edit_post('${post['_id']}')">Batal</button>
                 <button type="button" class="button is-small is-sparta btn-save-edit" onclick="submit_edit_post('${post['_id']}')">Simpan</button>
               </div>
-            </div>
+            </div>` : ''}
           </div>
           <nav class="level is-mobile mb-2">
             <div class="level-left"> 
-              <a class="level-item is-sparta" aria-label="heart" onclick="toggle_like('${post['_id']}', 'heart')">
+              <a class="level-item is-sparta" aria-label="heart" onclick="toggle_like('${target_post_id}', 'heart')">
                 <span class="icon is-small">
                   <i class="fa ${class_heart}" aria-hidden="true"></i>
-                </span>&nbsp;<span class="like-num">${post['count_heart']}</span>
+                </span>&nbsp;<span class="like-num">${count_heart}</span>
               </a>
-              <a class="level-item is-sparta" aria-label="stars" onclick="toggle_stars('${post['_id']}', 'stars')">
+              <a class="level-item is-sparta" aria-label="stars" onclick="toggle_stars('${target_post_id}', 'stars')">
                 <span class="icon is-small">
                   <i class="fa ${class_stars}" aria-hidden="true"></i>
-                </span>&nbsp;<span class="star-num">${num2str(post['count_stars'])}</span>
+                </span>&nbsp;<span class="star-num">${num2str(count_stars)}</span>
               </a>
-              <a class="level-item is-sparta" aria-label="thumbs" onclick="toggle_thumbs('${post['_id']}', 'thumbs')">
+              <a class="level-item is-sparta" aria-label="thumbs" onclick="toggle_thumbs('${target_post_id}', 'thumbs')">
                 <span class="icon is-small">
                   <i class="fa ${class_thumbs}" aria-hidden="true"></i>
-                </span>&nbsp;<span class="thumbs-num">${num2str(post['count_thumbs'])}</span>
+                </span>&nbsp;<span class="thumbs-num">${num2str(count_thumbs)}</span>
               </a>
-              <a class="level-item is-sparta btn-toggle-comment" aria-label="comment" onclick="toggle_comments('${post['_id']}')" title="Komentar">
+
+              <!-- Bulma Repost Menu Dropdown Button -->
+              <div class="level-item is-sparta repost-menu-container" style="position: relative;">
+                <a class="is-sparta btn-repost ${repost_by_me ? 'has-text-primary has-text-weight-bold' : ''}" aria-label="repost" onclick="toggle_repost_dropdown('${target_post_id}', event)" title="Repost / Kutip">
+                  <span class="icon is-small"><i class="fa fa-retweet ${repost_by_me ? 'has-text-primary' : ''}" id="repost-icon-bulma-${target_post_id}"></i></span>&nbsp;<span class="repost-num" id="repost-num-bulma-${target_post_id}">${num2str(count_repost)}</span>
+                </a>
+                <div id="repost-dropdown-${target_post_id}" class="is-hidden" style="position: absolute; bottom: 100%; left: 0; background: white; border: 1px solid #dbdbdb; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 30; min-width: 160px; padding: 4px 0;">
+                  <a class="dropdown-item is-size-7" onclick="toggle_repost('${target_post_id}'); hide_all_repost_dropdowns();" style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; color: #363636;">
+                    <i class="fa fa-retweet ${repost_by_me ? 'has-text-primary' : ''}"></i>
+                    <span>${repost_by_me ? 'Batalkan Repost' : 'Repost'}</span>
+                  </a>
+                  <a class="dropdown-item is-size-7" onclick="open_quote_modal('${target_post_id}'); hide_all_repost_dropdowns();" style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; color: #363636;">
+                    <i class="fa fa-quote-left"></i>
+                    <span>Kutip Postingan</span>
+                  </a>
+                </div>
+              </div>
+
+              <!-- Comments Button -->
+              <a class="level-item is-sparta btn-toggle-comment" aria-label="comment" onclick="toggle_comments('${target_post_id}')" title="Komentar">
                 <span class="icon is-small">
                   <i class="fa fa-comment-o" aria-hidden="true"></i>
                 </span>&nbsp;<span class="comment-num" data-count="${count_comments}">${display_comment_num}</span>
               </a>
             </div>
             <div class="level-right">
-              <a class="level-item is-sparta btn-bookmark ${is_bookmarked ? 'has-text-primary' : ''}" aria-label="bookmark" onclick="toggle_bookmark('${post['_id']}')" title="Bookmark">
-                <span class="icon is-small"><i class="fa ${is_bookmarked ? 'fa-bookmark' : 'fa-bookmark-o'}" id="bookmark-icon-${post['_id']}"></i></span>
+              <a class="level-item is-sparta btn-bookmark ${is_bookmarked ? 'has-text-primary' : ''}" aria-label="bookmark" onclick="toggle_bookmark('${target_post_id}')" title="Bookmark">
+                <span class="icon is-small"><i class="fa ${is_bookmarked ? 'fa-bookmark' : 'fa-bookmark-o'}" id="bookmark-icon-${target_post_id}"></i></span>
               </a>
             </div>
           </nav>
 
           <!-- Container Komentar (Collapsible) -->
-          <div class="comment-section is-hidden" id="comments-section-${post['_id']}">
+          <div class="comment-section is-hidden" id="comments-section-${target_post_id}">
             <hr class="comment-divider"/>
             
             <!-- Form Input Komentar Utama -->
             <div class="comment-form mb-3">
               <div class="field has-addons">
                 <div class="control is-expanded">
-                  <input class="input is-small is-rounded comment-input" id="input-comment-${post['_id']}" type="text" placeholder="Tulis komentar..." maxlength="2000" onkeydown="if(event.key==='Enter'){submit_comment('${post['_id']}');}" />
+                  <input class="input is-small is-rounded comment-input" id="input-comment-${target_post_id}" type="text" placeholder="Tulis komentar..." maxlength="2000" onkeydown="if(event.key==='Enter'){submit_comment('${target_post_id}');}" />
                 </div>
                 <div class="control">
-                  <button class="button is-small is-sparta is-rounded btn-submit-comment" onclick="submit_comment('${post['_id']}')">
+                  <button class="button is-small is-sparta is-rounded btn-submit-comment" onclick="submit_comment('${target_post_id}')">
                     <span class="icon is-small"><i class="fa fa-paper-plane"></i></span>
                     <span>Kirim</span>
                   </button>
@@ -372,7 +546,7 @@ function render_post_card(post, isStitch) {
             </div>
 
             <!-- Container List Komentar (Tree) -->
-            <div class="comment-list" id="comments-list-${post['_id']}"></div>
+            <div class="comment-list" id="comments-list-${target_post_id}"></div>
           </div>
 
         </div>
@@ -1429,6 +1603,14 @@ function render_notification_item(notif) {
     typeIcon = 'reply';
     typeBg = 'bg-tertiary-container text-on-tertiary-container';
     targetUrl = notif.post_exists && notif.post_id ? `/#${encodeURIComponent(notif.post_id)}` : 'javascript:void(0)';
+  } else if (notif.type === 'repost') {
+    typeIcon = 'repeat';
+    typeBg = 'bg-primary-container text-on-primary';
+    targetUrl = notif.post_exists && notif.post_id ? `/#${encodeURIComponent(notif.post_id)}` : 'javascript:void(0)';
+  } else if (notif.type === 'quote') {
+    typeIcon = 'format_quote';
+    typeBg = 'bg-primary-container text-on-primary';
+    targetUrl = notif.post_exists && notif.post_id ? `/#${encodeURIComponent(notif.post_id)}` : 'javascript:void(0)';
   }
 
   let postSnippetHtml = '';
@@ -1668,5 +1850,163 @@ function mark_all_notifications_read() {
 $(document).ready(function () {
   if ($('#nav-unread-badge').length || $('#header-unread-badge').length) {
     fetch_unread_notification_count();
+  }
+});
+
+// --- Repost & Quote Post Client Functions ---
+
+function hide_all_repost_dropdowns() {
+  $('[id^="repost-dropdown-"]').addClass('hidden is-hidden');
+}
+
+function toggle_repost_dropdown(postId, event) {
+  if (event) {
+    event.stopPropagation();
+  }
+  let $dd = $(`#repost-dropdown-${postId}`);
+  let isCurrentlyHidden = $dd.hasClass('hidden') || $dd.hasClass('is-hidden');
+  hide_all_repost_dropdowns();
+  if (isCurrentlyHidden) {
+    $dd.removeClass('hidden is-hidden');
+  }
+}
+
+$(document).on('click', function (e) {
+  if (!$(e.target).closest('.repost-menu-container').length) {
+    hide_all_repost_dropdowns();
+  }
+});
+
+function toggle_repost(postId) {
+  let p = window.postsCache ? window.postsCache[postId] : null;
+  let isCurrentlyReposted = p ? Boolean(p.repost_by_me) : false;
+  let endpoint = isCurrentlyReposted
+    ? `/api/posts/${encodeURIComponent(postId)}/unrepost`
+    : `/api/posts/${encodeURIComponent(postId)}/repost`;
+
+  $.ajax({
+    type: 'POST',
+    url: endpoint,
+    success: function (res) {
+      if (res.result === 'success') {
+        let isReposted = Boolean(res.is_reposted);
+        let newCount = res.count_repost !== undefined ? res.count_repost : 0;
+        if (p) {
+          p.repost_by_me = isReposted;
+          p.count_repost = newCount;
+        }
+
+        // Update UI counters and icons across both Stitch and Bulma
+        let $icon = $(`#repost-icon-${postId}`);
+        let $btn = $icon.closest('.btn-repost');
+        let $num = $(`#repost-num-${postId}`);
+
+        let $iconBulma = $(`#repost-icon-bulma-${postId}`);
+        let $btnBulma = $iconBulma.closest('.btn-repost');
+        let $numBulma = $(`#repost-num-bulma-${postId}`);
+
+        if (isReposted) {
+          $icon.addClass('text-primary');
+          $btn.addClass('text-primary font-bold');
+          $iconBulma.addClass('has-text-primary');
+          $btnBulma.addClass('has-text-primary has-text-weight-bold');
+        } else {
+          $icon.removeClass('text-primary');
+          $btn.removeClass('text-primary font-bold');
+          $iconBulma.removeClass('has-text-primary');
+          $btnBulma.removeClass('has-text-primary has-text-weight-bold');
+        }
+
+        $num.text(num2str(newCount));
+        $numBulma.text(num2str(newCount));
+
+        // If on user profile feed, refresh feed so repost appear or disappear
+        if (window.currentProfileUsername) {
+          get_posts(window.currentProfileUsername, window.currentFeedTab || 'following', '', false);
+        }
+      } else {
+        alert(res.msg || 'Operasi repost gagal.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Operasi repost gagal.');
+    }
+  });
+}
+
+function open_quote_modal(postId) {
+  let p = window.postsCache ? window.postsCache[postId] : null;
+  $('#quote-target-id').val(postId);
+  $('#quote-textarea').val('');
+
+  if (p) {
+    $('#quote-preview-avatar').attr('src', sanitizeAvatarUrl(p.profile_pic_real));
+    $('#quote-preview-name').text(p.profile_name || p.username);
+    $('#quote-preview-username').text(`@${p.username}`);
+    $('#quote-preview-comment').text(p.comment || '');
+    $('#quote-preview-card').removeClass('hidden is-hidden');
+  } else {
+    $('#quote-preview-card').addClass('hidden is-hidden');
+  }
+
+  $('#quote-modal').removeClass('hidden is-hidden').addClass('is-active flex');
+  setTimeout(function () {
+    $('#quote-textarea').focus();
+  }, 100);
+}
+
+function close_quote_modal() {
+  $('#quote-modal').addClass('hidden is-hidden').removeClass('is-active flex');
+  $('#quote-target-id').val('');
+  $('#quote-textarea').val('');
+}
+
+function submit_quote_post() {
+  let targetId = $('#quote-target-id').val();
+  let comment = $('#quote-textarea').val().trim();
+
+  if (!comment) {
+    alert('Komentar kutipan tidak boleh kosong.');
+    return;
+  }
+
+  if (comment.length > 5000) {
+    alert('Komentar kutipan melebihi batas maksimal 5000 karakter.');
+    return;
+  }
+
+  let $btn = $('#btn-submit-quote');
+  $btn.prop('disabled', true).addClass('opacity-75');
+
+  $.ajax({
+    type: 'POST',
+    url: `/api/posts/${encodeURIComponent(targetId)}/quote`,
+    contentType: 'application/json',
+    data: JSON.stringify({ comment: comment }),
+    success: function (res) {
+      if (res.result === 'success') {
+        close_quote_modal();
+        // Refresh feed
+        if (typeof get_posts === 'function') {
+          get_posts(window.currentProfileUsername || '', window.currentFeedTab || 'following', '', false);
+        } else if (typeof load_bookmarks === 'function' && window.isBookmarksPage) {
+          load_bookmarks('', false);
+        }
+      } else {
+        alert(res.msg || 'Gagal mengirim kutipan.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal mengirim kutipan.');
+    },
+    complete: function () {
+      $btn.prop('disabled', false).removeClass('opacity-75');
+    }
+  });
+}
+
+$(document).on('keydown', function (e) {
+  if (e.key === 'Escape' && !$('#quote-modal').hasClass('hidden')) {
+    close_quote_modal();
   }
 });
