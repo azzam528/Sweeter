@@ -228,15 +228,6 @@ function linkify_hashtags(escapedText) {
   });
 }
 
-// --- Hashtag Linkifier Helper ---
-
-function linkify_hashtags(escapedText) {
-  if (!escapedText) return '';
-  return escapedText.replace(/(^|[^\w/])#([a-zA-Z0-9_]{1,50})\b/g, function (match, prefix, tag) {
-    return `${prefix}<a href="/explore/tags/${encodeURIComponent(tag.toLowerCase())}" class="text-primary hover:underline font-semibold no-underline" onclick="event.stopPropagation()">#${tag}</a>`;
-  });
-}
-
 // --- Post Card Renderer (Stitch & Bulma) ---
 
 function render_post_card(post, isStitch) {
@@ -255,8 +246,6 @@ function render_post_card(post, isStitch) {
   let avatar_url = sanitizeAvatarUrl(post['profile_pic_real']);
   let profile_name_escaped = escapeHtml(post['profile_name']);
   let username_escaped = escapeHtml(post['username']);
-  let comment_raw_escaped = escapeHtml(post['comment']);
-  let comment_escaped = linkify_hashtags(comment_raw_escaped);
   let comment_raw_escaped = escapeHtml(post['comment']);
   let comment_escaped = linkify_hashtags(comment_raw_escaped);
 
@@ -308,8 +297,6 @@ function render_post_card(post, isStitch) {
       avatar_url = sanitizeAvatarUrl(orig['profile_pic_real']);
       profile_name_escaped = escapeHtml(orig['profile_name']);
       username_escaped = escapeHtml(orig['username']);
-      comment_raw_escaped = escapeHtml(orig['comment']);
-      comment_escaped = linkify_hashtags(comment_raw_escaped);
       comment_raw_escaped = escapeHtml(orig['comment']);
       comment_escaped = linkify_hashtags(comment_raw_escaped);
       time_before = time2str(new Date(orig['date']));
