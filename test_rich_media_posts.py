@@ -486,14 +486,17 @@ def run_tests(use_mock_db=False):
         )
 
         # 8. Valid uploaded image served cleanly with X-Content-Type-Options: nosniff
-        resp_serve = client.get(imgs1[0]["url"])
+        with client.get(imgs1[0]["url"]) as resp_serve:
+            served_status = resp_serve.status_code
+            served_data = resp_serve.data
+            served_nosniff = resp_serve.headers.get("X-Content-Type-Options")
         record(
             8,
             "Gambar terunggah disajikan aman dengan header nosniff",
-            resp_serve.status_code == 200
-            and resp_serve.data == VALID_PNG_BYTES
-            and resp_serve.headers.get("X-Content-Type-Options") == "nosniff",
-            f"status={resp_serve.status_code}, nosniff={resp_serve.headers.get('X-Content-Type-Options')}",
+            served_status == 200
+            and served_data == VALID_PNG_BYTES
+            and served_nosniff == "nosniff",
+            f"status={served_status}, nosniff={served_nosniff}",
         )
 
         # ------------------------------------------------------------------
@@ -600,6 +603,18 @@ def run_tests(use_mock_db=False):
         )
 
         # 13. Edit with keep_images + adding 1 new image removes dropped image safely AFTER update
+        # First verify failed edit (invalid image) does NOT delete old images
+        resp_edit_fail = client.post(
+            f"/api/posts/{p2_id}/edit",
+            data={
+                "comment_give": "Failed edit should keep old images",
+                "keep_images": json.dumps([imgs2[0]["filename"]]),
+                "images": (io.BytesIO(b"not-an-image"), "bad.png"),
+            },
+            content_type="multipart/form-data",
+        )
+        old_still_there = all(os.path.isfile(os.path.join(temp_upload_dir, im["filename"])) for im in imgs2)
+
         resp_edit_img = client.post(
             f"/api/posts/{p2_id}/edit",
             data={
@@ -615,13 +630,15 @@ def run_tests(use_mock_db=False):
         kept_0 = imgs2[0]["filename"]
         record(
             13,
-            "Edit gambar menjaga yang dipertahankan, menambah baru, dan menghapus gambar lama yang dibuang",
-            resp_edit_img.status_code == 200
+            "Edit gambar menjaga yang dipertahankan, tidak hapus lama saat gagal, dan hapus yang dibuang saat sukses",
+            resp_edit_fail.status_code == 400
+            and old_still_there
+            and resp_edit_img.status_code == 200
             and len(ed2.get("images", [])) == 3
             and os.path.isfile(os.path.join(temp_upload_dir, kept_0))
             and not os.path.exists(os.path.join(temp_upload_dir, removed_2))
             and not os.path.exists(os.path.join(temp_upload_dir, removed_3)),
-            f"new_count={len(ed2.get('images', []))}",
+            f"fail_status={resp_edit_fail.status_code}, new_count={len(ed2.get('images', []))}",
         )
 
         # 14. Deleting a REPOST does NOT delete original post's image file!

@@ -149,7 +149,7 @@ function handle_ajax_error(xhr, defaultMsg) {
     try {
       let res = JSON.parse(xhr.responseText);
       if (res.msg) errorMsg = res.msg;
-    } catch (e) {}
+    } catch (e) { }
   }
   alert(errorMsg);
 }
@@ -228,6 +228,15 @@ function linkify_hashtags(escapedText) {
   });
 }
 
+// --- Hashtag Linkifier Helper ---
+
+function linkify_hashtags(escapedText) {
+  if (!escapedText) return '';
+  return escapedText.replace(/(^|[^\w/])#([a-zA-Z0-9_]{1,50})\b/g, function (match, prefix, tag) {
+    return `${prefix}<a href="/explore/tags/${encodeURIComponent(tag.toLowerCase())}" class="text-primary hover:underline font-semibold no-underline" onclick="event.stopPropagation()">#${tag}</a>`;
+  });
+}
+
 // --- Post Card Renderer (Stitch & Bulma) ---
 
 function render_post_card(post, isStitch) {
@@ -246,6 +255,8 @@ function render_post_card(post, isStitch) {
   let avatar_url = sanitizeAvatarUrl(post['profile_pic_real']);
   let profile_name_escaped = escapeHtml(post['profile_name']);
   let username_escaped = escapeHtml(post['username']);
+  let comment_raw_escaped = escapeHtml(post['comment']);
+  let comment_escaped = linkify_hashtags(comment_raw_escaped);
   let comment_raw_escaped = escapeHtml(post['comment']);
   let comment_escaped = linkify_hashtags(comment_raw_escaped);
 
@@ -297,6 +308,8 @@ function render_post_card(post, isStitch) {
       avatar_url = sanitizeAvatarUrl(orig['profile_pic_real']);
       profile_name_escaped = escapeHtml(orig['profile_name']);
       username_escaped = escapeHtml(orig['username']);
+      comment_raw_escaped = escapeHtml(orig['comment']);
+      comment_escaped = linkify_hashtags(comment_raw_escaped);
       comment_raw_escaped = escapeHtml(orig['comment']);
       comment_escaped = linkify_hashtags(comment_raw_escaped);
       time_before = time2str(new Date(orig['date']));
@@ -1352,12 +1365,12 @@ function toggle_follow(target_username, btnSelector, countSelector) {
 
         if (nowFollowing) {
           $btn.removeClass('bg-primary-container text-on-primary hover:bg-primary border-0')
-              .addClass('bg-surface-container-high text-on-surface border border-outline-variant group hover:bg-error-container hover:text-on-error-container')
-              .html('<span class="group-hover:hidden">Following</span><span class="hidden group-hover:inline">Unfollow</span>');
+            .addClass('bg-surface-container-high text-on-surface border border-outline-variant group hover:bg-error-container hover:text-on-error-container')
+            .html('<span class="group-hover:hidden">Following</span><span class="hidden group-hover:inline">Unfollow</span>');
         } else {
           $btn.removeClass('bg-surface-container-high text-on-surface border border-outline-variant group hover:bg-error-container hover:text-on-error-container')
-              .addClass('bg-primary-container text-on-primary hover:bg-primary border-0')
-              .html('Follow');
+            .addClass('bg-primary-container text-on-primary hover:bg-primary border-0')
+            .html('Follow');
         }
 
         if ($count.length && res.follower_count !== undefined) {
@@ -1527,7 +1540,7 @@ function _clear_edit_image_previews(post_id) {
   if (state && Array.isArray(state.newItems)) {
     state.newItems.forEach(item => {
       if (item.objectUrl) {
-        try { URL.revokeObjectURL(item.objectUrl); } catch (e) {}
+        try { URL.revokeObjectURL(item.objectUrl); } catch (e) { }
       }
     });
   }
@@ -1579,7 +1592,7 @@ function remove_edit_new_image(post_id, itemId) {
   if (!state) return;
   const target = state.newItems.find(x => x.id === itemId);
   if (target && target.objectUrl) {
-    try { URL.revokeObjectURL(target.objectUrl); } catch (e) {}
+    try { URL.revokeObjectURL(target.objectUrl); } catch (e) { }
   }
   state.newItems = state.newItems.filter(x => x.id !== itemId);
   render_edit_images_preview(post_id);
@@ -2025,7 +2038,7 @@ function handle_notification_click(notificationId, targetUrl, isRead) {
         update_notification_badges(res.unread_count);
         let $card = $(`#notif-card-${notificationId}`);
         $card.removeClass('bg-surface-container-high/60 border-l-4 border-primary')
-             .addClass('bg-surface-container-lowest');
+          .addClass('bg-surface-container-lowest');
         $(`#unread-dot-${notificationId}`).remove();
         $(`#mark-read-btn-${notificationId}`).remove();
       }
@@ -2054,9 +2067,9 @@ function mark_single_notification_read(notificationId, event) {
         update_notification_badges(res.unread_count);
         let $card = $(`#notif-card-${notificationId}`);
         $card.removeClass('bg-surface-container-high/60 border-l-4 border-primary')
-             .addClass('bg-surface-container-lowest');
-        $(`#unread-dot-${notificationId}`).fadeOut(200, function() { $(this).remove(); });
-        $btn.fadeOut(200, function() { $(this).remove(); });
+          .addClass('bg-surface-container-lowest');
+        $(`#unread-dot-${notificationId}`).fadeOut(200, function () { $(this).remove(); });
+        $btn.fadeOut(200, function () { $(this).remove(); });
       } else {
         alert(res.msg || 'Gagal menandai notifikasi dibaca.');
       }
@@ -2080,7 +2093,7 @@ function mark_all_notifications_read() {
         // Ubah tampilan semua kartu notifikasi menjadi sudah dibaca
         $('#notifications-box > article').each(function () {
           $(this).removeClass('bg-surface-container-high/60 border-l-4 border-primary')
-                 .addClass('bg-surface-container-lowest');
+            .addClass('bg-surface-container-lowest');
         });
         $('[id^="unread-dot-"]').remove();
         $('[id^="mark-read-btn-"]').remove();
@@ -2365,7 +2378,7 @@ function switch_trending_period(period) {
 
   // Update period chip styles
   $('.trending-chip').removeClass('bg-primary-container text-on-primary shadow-sm')
-                     .addClass('bg-surface-container-high text-on-surface-variant hover:text-on-surface');
+    .addClass('bg-surface-container-high text-on-surface-variant hover:text-on-surface');
 
   $(`.trending-chip[data-period="${period}"]`)
     .removeClass('bg-surface-container-high text-on-surface-variant hover:text-on-surface')
@@ -2648,12 +2661,12 @@ function toggle_follow_simple(targetUsername, btnElement) {
       if (res.result === 'success') {
         if (res.is_following) {
           $btn.removeClass('bg-primary-container text-on-primary hover:bg-primary')
-              .addClass('bg-surface-container-high text-on-surface hover:bg-error-container hover:text-error')
-              .text('Following');
+            .addClass('bg-surface-container-high text-on-surface hover:bg-error-container hover:text-error')
+            .text('Following');
         } else {
           $btn.removeClass('bg-surface-container-high text-on-surface hover:bg-error-container hover:text-error')
-              .addClass('bg-primary-container text-on-primary hover:bg-primary')
-              .text('Follow');
+            .addClass('bg-primary-container text-on-primary hover:bg-primary')
+            .text('Follow');
         }
       } else {
         alert(res.msg || 'Gagal mengubah status pertemanan.');
@@ -2851,7 +2864,7 @@ function remove_composer_image(itemId) {
   if (idx !== -1) {
     const removed = window.composerImages[idx];
     if (removed.objectUrl) {
-      try { URL.revokeObjectURL(removed.objectUrl); } catch (e) {}
+      try { URL.revokeObjectURL(removed.objectUrl); } catch (e) { }
     }
     window.composerImages.splice(idx, 1);
   }
@@ -2862,7 +2875,7 @@ function remove_composer_image(itemId) {
 function clear_composer_images() {
   window.composerImages.forEach(item => {
     if (item.objectUrl) {
-      try { URL.revokeObjectURL(item.objectUrl); } catch (e) {}
+      try { URL.revokeObjectURL(item.objectUrl); } catch (e) { }
     }
   });
   window.composerImages = [];
@@ -2895,7 +2908,7 @@ function submit_rich_post() {
   const $btn = $('#post-submit-btn');
   const originalHtml = $btn.html();
   $btn.prop('disabled', true).addClass('opacity-75 cursor-not-allowed')
-      .html('<i class="fa fa-spinner fa-spin text-[13px]"></i><span>Mengunggah...</span>');
+    .html('<i class="fa fa-spinner fa-spin text-[13px]"></i><span>Mengunggah...</span>');
 
   const formData = new FormData();
   formData.append('comment_give', content);

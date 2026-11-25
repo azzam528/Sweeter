@@ -1,6 +1,8 @@
 import os
 import re
 from datetime import datetime, timezone, timedelta
+import re
+from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
 from pymongo import MongoClient
@@ -151,6 +153,191 @@ def count_reposts(post_id: str) -> int:
         'original_post_id': str(post_id),
         'post_type': 'repost'
     })
+
+
+def extract_hashtags(text: str) -> list:
+    """
+    Mengekstrak hashtag dari teks secara aman dan case-insensitive:
+    - Hanya mencocokkan hashtag valid: diawali '#', diikuti 1-50 karakter alfanumerik / underscore.
+    - Menghindari potongan URL (seperti http://site.com/#section atau href="#anchor").
+    - Mengembalikan list string lowercase unik tanpa simbol '#' (misal: ['linux', 'python']).
+    """
+    if not text or not isinstance(text, str):
+        return []
+
+    # Hapus URL dari teks terlebih dahulu agar fragmen URL '#foo' tidak dianggap hashtag
+    cleaned_text = re.sub(r'https?://[^\s]+', '', text)
+
+    # Ekstrak hashtag: diawali awal string atau bukan karakter alfanumerik/slash
+    pattern = r'(?:^|[^\w/])#([a-zA-Z0-9_]{1,50})\b'
+    matches = re.findall(pattern, cleaned_text)
+
+    # Deduplikasi case-insensitive dengan mempertahankan urutan kemunculan pertama
+    seen = set()
+    result = []
+    for tag in matches:
+        tag_lower = tag.lower()
+        if tag_lower not in seen:
+            seen.add(tag_lower)
+            result.append(tag_lower)
+    return result
+
+
+def get_trending_hashtags(limit: int = 10, period: str = 'all') -> list:
+    """
+    Mengambil daftar hashtag terpopuler berdasarkan jumlah kemunculan postingan.
+    Mendukung filter periode: 'today', 'week', 'all'.
+    """
+    match_filter = {
+        'hashtags': {'$exists': True, '$ne': []},
+        'post_type': {'$ne': 'repost'}
+    }
+    if period == 'today':
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        match_filter['date'] = {'$gte': cutoff}
+    elif period == 'week':
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        match_filter['date'] = {'$gte': cutoff}
+
+    try:
+        pipeline = [
+            {'$match': match_filter},
+            {'$unwind': '$hashtags'},
+            {'$match': {'hashtags': {'$ne': ''}}},
+            {'$group': {
+                '_id': '$hashtags',
+                'post_count': {'$sum': 1}
+            }},
+            {'$sort': {'post_count': -1}},
+            {'$limit': max(1, min(limit, 50))}
+        ]
+        results = []
+        for doc in db.posts.aggregate(pipeline):
+            tag_name = doc['_id']
+            results.append({
+                'tag': tag_name,
+                'display_tag': f"#{tag_name}",
+                'post_count': doc['post_count'],
+                'url': f"/explore/tags/{tag_name}"
+            })
+        return results
+    except Exception as e:
+        print(f"Error in get_trending_hashtags: {e}")
+        return []
+
+
+def get_suggested_users(current_username: str, limit: int = 5) -> list:
+    """
+    Menghasilkan rekomendasi pengguna (Discover People) untuk current_username:
+    1. Pengguna yang diikuti oleh orang-orang yang di-follow current_username (mutual follow).
+    2. Pengguna dengan jumlah follower terbanyak (Popular on Sweeter).
+    3. Pengguna aktif lainnya di db.users.
+    Pengecualian mutlak: current_username dan pengguna yang sudah di-follow.
+    """
+    if not current_username:
+        return []
+
+    my_following = set(db.follows.distinct('following', {'follower': current_username}))
+    exclude_users = my_following | {current_username}
+
+    suggested = []
+    seen_usernames = set()
+
+    # 1. Rekomendasi Mutual Follows (Followed by people you follow)
+    if my_following:
+        try:
+            mutual_cursor = db.follows.aggregate([
+                {'$match': {
+                    'follower': {'$in': list(my_following)},
+                    'following': {'$nin': list(exclude_users)}
+                }},
+                {'$group': {
+                    '_id': '$following',
+                    'count': {'$sum': 1},
+                    'mutual_followers': {'$addToSet': '$follower'}
+                }},
+                {'$sort': {'count': -1}},
+                {'$limit': limit}
+            ])
+            for item in mutual_cursor:
+                u_name = item['_id']
+                if u_name not in seen_usernames and u_name not in exclude_users:
+                    user_doc = db.users.find_one({'username': u_name})
+                    if user_doc:
+                        seen_usernames.add(u_name)
+                        mutuals = item.get('mutual_followers', [])
+                        if len(mutuals) == 1:
+                            reason = f"Followed by @{mutuals[0]}"
+                        elif len(mutuals) > 1:
+                            reason = f"Followed by @{mutuals[0]} and {len(mutuals)-1} other{'s' if len(mutuals)>2 else ''}"
+                        else:
+                            reason = "Followed by people you follow"
+
+                        follower_count = count_followers(u_name)
+                        suggested.append({
+                            'username': u_name,
+                            'profile_name': user_doc.get('profile_name', u_name),
+                            'profile_pic_real': user_doc.get('profile_pic_real', 'profile_pics/profile_placeholder.png'),
+                            'profile_info': user_doc.get('profile_info', ''),
+                            'follower_count': follower_count,
+                            'recommendation_reason': reason,
+                            'is_following': False
+                        })
+                        if len(suggested) >= limit:
+                            return suggested
+        except Exception as e:
+            print(f"Error computing mutual follow recommendations: {e}")
+
+    # 2. Rekomendasi Akun Populer (Popular on Sweeter)
+    try:
+        popular_cursor = db.follows.aggregate([
+            {'$match': {'following': {'$nin': list(exclude_users | seen_usernames)}}},
+            {'$group': {'_id': '$following', 'follower_count': {'$sum': 1}}},
+            {'$sort': {'follower_count': -1}},
+            {'$limit': limit * 2}
+        ])
+        for item in popular_cursor:
+            u_name = item['_id']
+            if u_name not in seen_usernames and u_name not in exclude_users:
+                user_doc = db.users.find_one({'username': u_name})
+                if user_doc:
+                    seen_usernames.add(u_name)
+                    follower_count = item['follower_count']
+                    suggested.append({
+                        'username': u_name,
+                        'profile_name': user_doc.get('profile_name', u_name),
+                        'profile_pic_real': user_doc.get('profile_pic_real', 'profile_pics/profile_placeholder.png'),
+                        'profile_info': user_doc.get('profile_info', ''),
+                        'follower_count': follower_count,
+                        'recommendation_reason': f"Popular on Sweeter · {follower_count} followers",
+                        'is_following': False
+                    })
+                    if len(suggested) >= limit:
+                        return suggested
+    except Exception as e:
+        print(f"Error computing popular user recommendations: {e}")
+
+    # 3. Fallback: Pengguna aktif lain di db.users
+    if len(suggested) < limit:
+        remaining_needed = limit - len(suggested)
+        other_users = db.users.find(
+            {'username': {'$nin': list(exclude_users | seen_usernames)}},
+            {'_id': 0, 'username': 1, 'profile_name': 1, 'profile_pic_real': 1, 'profile_info': 1}
+        ).limit(remaining_needed)
+        for u in other_users:
+            u_name = u['username']
+            follower_count = count_followers(u_name)
+            suggested.append({
+                'username': u_name,
+                'profile_name': u.get('profile_name', u_name),
+                'profile_pic_real': u.get('profile_pic_real', 'profile_pics/profile_placeholder.png'),
+                'profile_info': u.get('profile_info', ''),
+                'follower_count': follower_count,
+                'recommendation_reason': "Active on Sweeter",
+                'is_following': False
+            })
+
+    return suggested
 
 
 def extract_hashtags(text: str) -> list:
