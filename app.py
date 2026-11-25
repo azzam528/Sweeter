@@ -1,4 +1,5 @@
 import os
+import re
 import hashlib
 import jwt
 import warnings
@@ -20,7 +21,18 @@ from flask import (
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
-from database import db, check_connection, is_reposted, count_reposts
+from database import (
+    db,
+    check_connection,
+    is_reposted,
+    count_reposts,
+    is_following,
+    count_followers,
+    count_following,
+    extract_hashtags,
+    get_trending_hashtags,
+    get_suggested_users,
+)
 from notifications import (
     create_notification,
     get_unread_count,
@@ -354,13 +366,14 @@ def posting():
         user_info = db.users.find_one({'username': payload.get('id')})
         comment_receive = request.form.get('comment_give')
         date_receive = request.form.get('date_give')
+        tags = extract_hashtags(comment_receive)
         doc = {
             'username': user_info.get('username'),
             'profile_name' : user_info.get('profile_name'),
             'profile_pic_real' : user_info.get('profile_pic_real'),
             'comment' : comment_receive,
             'date': date_receive,
-            
+            'hashtags': tags
         }
         db.posts.insert_one(doc)
         return jsonify({
@@ -506,6 +519,7 @@ def enrich_posts_metadata(posts, current_username):
         post['is_bookmarked'] = pid in my_bookmarks
         post['is_mine'] = (post.get('username') == current_username)
         post['is_edited'] = bool(post.get('is_edited', False))
+        post['hashtags'] = post.get('hashtags') if ('hashtags' in post and post.get('hashtags') is not None) else extract_hashtags(post.get('comment', ''))
 
         if post.get('original_post_id'):
             orig_id = str(post['original_post_id'])
@@ -1725,11 +1739,13 @@ def edit_post(post_id=None):
     if len(new_content) > 5000:
         return jsonify({'result': 'fail', 'msg': 'Post content exceeds maximum length'}), 400
 
+    tags = extract_hashtags(new_content)
     now = datetime.now(timezone.utc).isoformat()
     db.posts.update_one(
         {'_id': ObjectId(target_pid)},
         {'$set': {
             'comment': new_content,
+            'hashtags': tags,
             'is_edited': True,
             'updated_at': now
         }}
@@ -1990,6 +2006,7 @@ def quote_post(post_id=None):
 
     user_info = db.users.find_one({'username': current_username}) or {}
     now = datetime.now(timezone.utc).isoformat()
+    tags = extract_hashtags(content)
     quote_doc = {
         'username': current_username,
         'profile_name': user_info.get('profile_name', current_username),
@@ -1997,7 +2014,8 @@ def quote_post(post_id=None):
         'comment': content,
         'date': now,
         'post_type': 'quote',
-        'original_post_id': actual_pid
+        'original_post_id': actual_pid,
+        'hashtags': tags
     }
 
     res = db.posts.insert_one(quote_doc)
@@ -2018,6 +2036,399 @@ def quote_post(post_id=None):
         'original_post_id': actual_pid,
         'comment': content
     }), 201  
+
+
+def calculate_trending_score(post, now=None, period='all') -> float:
+    """
+    Menghitung skor trending sebuah postingan:
+    - Bobot interaksi:
+      Reaksi (heart, stars, thumbs) = 2.0 poin
+      Komentar & balasan = 3.5 poin
+      Repost / pembagian = 4.0 poin
+      Bookmark = 2.5 poin
+    - Faktor Recency / Time Decay:
+      T = usia postingan dalam jam (minimum 0.1 jam)
+      Gravity G: 'today'=1.2, 'week'=1.0, 'all'=0.7
+      Score = (Total Engagement + 1.0) / (T + 2.0)^G
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    # 1. Hitung total poin interaksi
+    reactions = (
+        (post.get('count_heart', 0) * 2.0)
+        + (post.get('count_stars', 0) * 2.0)
+        + (post.get('count_thumbs', 0) * 2.0)
+    )
+    comments = post.get('count_comments', 0) * 3.5
+    reposts = post.get('count_repost', 0) * 4.0
+    bookmarks = (1 if post.get('is_bookmarked') else 0) * 2.5
+
+    total_engagement = reactions + comments + reposts + bookmarks
+
+    # 2. Hitung usia postingan dalam jam
+    post_date_str = post.get('date')
+    hours_age = 0.5
+    if post_date_str:
+        try:
+            if post_date_str.endswith('Z'):
+                post_dt = datetime.fromisoformat(post_date_str.replace('Z', '+00:00'))
+            else:
+                post_dt = datetime.fromisoformat(post_date_str)
+            if post_dt.tzinfo is None:
+                post_dt = post_dt.replace(tzinfo=timezone.utc)
+            delta = now - post_dt
+            hours_age = max(0.1, delta.total_seconds() / 3600.0)
+        except Exception:
+            hours_age = 1.0
+
+    # 3. Penalti gravitasi berdasarkan periode waktu
+    gravity = 0.7
+    if period == 'today':
+        gravity = 1.2
+    elif period == 'week':
+        gravity = 1.0
+
+    score = (total_engagement + 1.0) / ((hours_age + 2.0) ** gravity)
+    return round(score, 4)
+
+
+@app.route('/explore', methods=['GET'])
+def explore_page():
+    """Halaman beranda Explore & Trending."""
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return redirect(url_for('login'))
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+        user_info = db.users.find_one({'username': current_username})
+        if not user_info:
+            return redirect(url_for('login'))
+
+        unread_count = get_unread_count(current_username)
+        trending_tags = get_trending_hashtags(limit=5)
+        suggested_users = get_suggested_users(current_username, limit=4)
+
+        return render_template(
+            'explore.html',
+            user_info=user_info,
+            unread_count=unread_count,
+            trending_tags=trending_tags,
+            suggested_users=suggested_users
+        )
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return redirect(url_for('login'))
+
+
+@app.route('/explore/tags/<tag>', methods=['GET'])
+def topic_page(tag):
+    """Halaman Topik / Hashtag spesifik."""
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return redirect(url_for('login'))
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+        user_info = db.users.find_one({'username': current_username})
+        if not user_info:
+            return redirect(url_for('login'))
+
+        clean_tag = tag.strip().lower().lstrip('#')
+        total_posts = db.posts.count_documents({'hashtags': clean_tag, 'post_type': {'$ne': 'repost'}})
+        unread_count = get_unread_count(current_username)
+        trending_tags = get_trending_hashtags(limit=5)
+
+        return render_template(
+            'topic.html',
+            user_info=user_info,
+            tag=clean_tag,
+            display_tag=f"#{clean_tag}",
+            total_posts=total_posts,
+            unread_count=unread_count,
+            trending_tags=trending_tags
+        )
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return redirect(url_for('login'))
+
+
+@app.route('/api/trending', methods=['GET'])
+def get_trending_posts():
+    """
+    Endpoint untuk mengambil daftar postingan trending dengan dukungan filter periode:
+    - today: 24 jam terakhir (gravity 1.2)
+    - week: 7 hari terakhir (gravity 1.0)
+    - all: seluruh waktu dengan time decay (gravity 0.7)
+    """
+    token_receive = request.cookies.get('mytoken')
+    current_username = None
+    if token_receive:
+        try:
+            payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+            current_username = payload.get('id')
+        except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+            pass
+
+    period = request.args.get('period', 'all').lower().strip()
+    if period not in ['today', 'week', 'all']:
+        period = 'all'
+
+    limit_raw = request.args.get('limit', '20').strip()
+    try:
+        limit = max(1, min(int(limit_raw), 50))
+    except ValueError:
+        limit = 20
+
+    now = datetime.now(timezone.utc)
+    match_query = {'post_type': {'$ne': 'repost'}}
+
+    if period == 'today':
+        cutoff = (now - timedelta(days=1)).isoformat()
+        match_query['date'] = {'$gte': cutoff}
+    elif period == 'week':
+        cutoff = (now - timedelta(days=7)).isoformat()
+        match_query['date'] = {'$gte': cutoff}
+
+    candidate_posts = list(db.posts.find(match_query).sort([('date', -1)]).limit(100))
+    if not candidate_posts:
+        return jsonify({
+            'result': 'success',
+            'posts': [],
+            'period': period,
+            'total': 0
+        }), 200
+
+    enriched = enrich_posts_metadata(candidate_posts, current_username)
+    for p in enriched:
+        p['trending_score'] = calculate_trending_score(p, now=now, period=period)
+
+    # Urutkan berdasarkan skor trending tertinggi
+    enriched.sort(key=lambda p: (p['trending_score'], p.get('date', '')), reverse=True)
+    trending_posts = enriched[:limit]
+
+    return jsonify({
+        'result': 'success',
+        'posts': trending_posts,
+        'period': period,
+        'total': len(trending_posts)
+    }), 200
+
+
+@app.route('/api/trending/hashtags', methods=['GET'])
+def get_trending_hashtags_api():
+    """Mengembalikan daftar hashtag yang sedang trending beserta jumlah postingannya."""
+    period = request.args.get('period', 'all').lower().strip()
+    limit_raw = request.args.get('limit', '10').strip()
+    try:
+        limit = max(1, min(int(limit_raw), 30))
+    except ValueError:
+        limit = 10
+
+    hashtags = get_trending_hashtags(limit=limit, period=period)
+    return jsonify({
+        'result': 'success',
+        'hashtags': hashtags,
+        'period': period,
+        'total': len(hashtags)
+    }), 200
+
+
+@app.route('/api/discover/people', methods=['GET'])
+def get_discover_people_api():
+    """
+    Mengembalikan daftar rekomendasi pengguna (suggested users) untuk current_username.
+    Memeriksa otentikasi JWT.
+    """
+    token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    try:
+        payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+        current_username = payload.get('id')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    limit_raw = request.args.get('limit', '5').strip()
+    try:
+        limit = max(1, min(int(limit_raw), 20))
+    except ValueError:
+        limit = 5
+
+    people = get_suggested_users(current_username=current_username, limit=limit)
+    return jsonify({
+        'result': 'success',
+        'users': people,
+        'total': len(people)
+    }), 200
+
+
+@app.route('/api/tags/<tag>/posts', methods=['GET'])
+def get_tag_posts_api(tag):
+    """
+    Mengambil postingan yang memiliki hashtag tertentu.
+    Mendukung pengurutan 'trending' atau 'latest', serta pagination cursor.
+    """
+    token_receive = request.cookies.get('mytoken')
+    current_username = None
+    if token_receive:
+        try:
+            payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+            current_username = payload.get('id')
+        except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+            pass
+
+    if not tag or not isinstance(tag, str) or not tag.strip():
+        return jsonify({'result': 'fail', 'msg': 'Invalid hashtag'}), 400
+
+    clean_tag = tag.strip().lower().lstrip('#')
+    sort_mode = request.args.get('sort', 'trending').lower().strip()
+    limit_raw = request.args.get('limit', '20').strip()
+    cursor = request.args.get('cursor', '').strip()
+
+    try:
+        limit = max(1, min(int(limit_raw), 50))
+    except ValueError:
+        limit = 20
+
+    query = {'hashtags': clean_tag, 'post_type': {'$ne': 'repost'}}
+    total_count = db.posts.count_documents({'hashtags': clean_tag, 'post_type': {'$ne': 'repost'}})
+
+    if sort_mode == 'latest':
+        if cursor and ObjectId.is_valid(cursor):
+            anchor = db.posts.find_one({'_id': ObjectId(cursor)})
+            if anchor:
+                query = {
+                    '$and': [
+                        query,
+                        {'$or': [
+                            {'date': {'$lt': anchor.get('date', '')}},
+                            {'date': anchor.get('date', ''), '_id': {'$lt': anchor['_id']}}
+                        ]}
+                    ]
+                }
+        posts = list(db.posts.find(query).sort([('date', -1), ('_id', -1)]).limit(limit))
+        enriched = enrich_posts_metadata(posts, current_username)
+        has_more = (len(posts) == limit)
+        next_cursor = str(posts[-1]['_id']) if has_more else None
+        return jsonify({
+            'result': 'success',
+            'tag': clean_tag,
+            'posts': enriched,
+            'total_count': total_count,
+            'has_more': has_more,
+            'next_cursor': next_cursor,
+            'sort': 'latest'
+        }), 200
+    else:
+        # Trending sort
+        posts = list(db.posts.find(query).sort([('date', -1)]).limit(100))
+        enriched = enrich_posts_metadata(posts, current_username)
+        now = datetime.now(timezone.utc)
+        for p in enriched:
+            p['trending_score'] = calculate_trending_score(p, now=now, period='all')
+        enriched.sort(key=lambda p: (p['trending_score'], p.get('date', '')), reverse=True)
+        results = enriched[:limit]
+        return jsonify({
+            'result': 'success',
+            'tag': clean_tag,
+            'posts': results,
+            'total_count': total_count,
+            'has_more': False,
+            'next_cursor': None,
+            'sort': 'trending'
+        }), 200
+
+
+@app.route('/api/search', methods=['GET'])
+def search_api():
+    """
+    Pencarian menyeluruh di Sweeter:
+    - User (berdasarkan username dan profile_name)
+    - Postingan (berdasarkan teks comment)
+    - Hashtag (berdasarkan nama tag)
+    Dilengkapi pengamanan regex escaping untuk mencegah ReDoS & injection.
+    """
+    token_receive = request.cookies.get('mytoken')
+    current_username = None
+    if token_receive:
+        try:
+            payload = jwt.decode(token_receive, SECRET_KEY, algorithms=['HS256'])
+            current_username = payload.get('id')
+        except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+            pass
+
+    q = request.args.get('q', '').strip()
+    if not q:
+        return jsonify({'result': 'fail', 'msg': 'Search query cannot be empty'}), 400
+
+    if len(q) > 100:
+        return jsonify({'result': 'fail', 'msg': 'Search query exceeds maximum length of 100 characters'}), 400
+
+    search_type = request.args.get('type', 'all').lower().strip()
+    limit_raw = request.args.get('limit', '20').strip()
+    try:
+        limit = max(1, min(int(limit_raw), 50))
+    except ValueError:
+        limit = 20
+
+    safe_q = re.escape(q)
+    results = {'result': 'success', 'query': q, 'type': search_type, 'users': [], 'posts': [], 'hashtags': []}
+
+    # 1. Search Users
+    if search_type in ['all', 'users']:
+        clean_user_q = re.escape(q.lstrip('@').strip())
+        user_matches = list(db.users.find({
+            '$or': [
+                {'username': {'$regex': clean_user_q, '$options': 'i'}},
+                {'profile_name': {'$regex': clean_user_q, '$options': 'i'}}
+            ]
+        }, {'password': 0}).limit(limit))
+
+        for u in user_matches:
+            uname = u['username']
+            results['users'].append({
+                'username': uname,
+                'profile_name': u.get('profile_name', uname),
+                'profile_pic_real': u.get('profile_pic_real', 'profile_pics/profile_placeholder.png'),
+                'profile_info': u.get('profile_info', ''),
+                'follower_count': count_followers(uname),
+                'is_following': is_following(current_username, uname) if current_username else False,
+                'is_mine': (uname == current_username)
+            })
+
+    # 2. Search Hashtags
+    if search_type in ['all', 'tags'] or q.startswith('#'):
+        clean_tag_q = q.lstrip('#').lower().strip()
+        if clean_tag_q:
+            safe_tag_q = re.escape(clean_tag_q)
+            pipeline = [
+                {'$match': {'hashtags': {'$regex': safe_tag_q, '$options': 'i'}, 'post_type': {'$ne': 'repost'}}},
+                {'$unwind': '$hashtags'},
+                {'$match': {'hashtags': {'$regex': safe_tag_q, '$options': 'i'}}},
+                {'$group': {'_id': '$hashtags', 'post_count': {'$sum': 1}}},
+                {'$sort': {'post_count': -1}},
+                {'$limit': limit}
+            ]
+            tag_matches = list(db.posts.aggregate(pipeline))
+            for t in tag_matches:
+                t_name = t['_id']
+                results['hashtags'].append({
+                    'tag': t_name,
+                    'display_tag': f"#{t_name}",
+                    'post_count': t['post_count'],
+                    'url': f"/explore/tags/{t_name}"
+                })
+
+    # 3. Search Posts
+    if search_type in ['all', 'posts']:
+        post_query = {'comment': {'$regex': safe_q, '$options': 'i'}, 'post_type': {'$ne': 'repost'}}
+        post_matches = list(db.posts.find(post_query).sort([('date', -1)]).limit(limit))
+        results['posts'] = enrich_posts_metadata(post_matches, current_username)
+
+    return jsonify(results), 200  
 
 if __name__ == "__main__":
     app.run('0.0.0.0', port=5000, debug=True)
