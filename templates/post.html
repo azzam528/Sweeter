@@ -227,14 +227,54 @@
               <textarea id="post-textarea"
                         class="w-full bg-surface-container-low rounded-lg p-space-sm font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary-container resize-none transition-all"
                         placeholder="What's on your mind?"
+                        maxlength="5000"
                         rows="3"></textarea>
-              <div class="flex items-center justify-between mt-space-sm pt-space-xs">
+
+              <!-- Error Banner (Client & Server Validation Feedback) -->
+              <div id="post-composer-error" class="hidden mt-space-xs px-space-sm py-1.5 rounded-lg bg-error-container text-on-error-container font-label-sm text-label-sm flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1.5 min-w-0">
+                  <span class="material-symbols-outlined text-[16px] shrink-0">error</span>
+                  <span id="post-composer-error-text" class="truncate"></span>
+                </div>
+                <button type="button" onclick="$('#post-composer-error').addClass('hidden')" class="border-0 bg-transparent text-on-error-container cursor-pointer p-0.5 leading-none" aria-label="Tutup pesan error">
+                  <span class="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              </div>
+
+              <!-- Image Preview Grid -->
+              <div id="post-image-preview-container" class="hidden mt-space-sm p-space-sm rounded-xl bg-surface-container-low/70 border border-outline-variant/40">
+                <div class="flex items-center justify-between mb-space-xs">
+                  <span id="post-image-count-label" class="font-label-sm text-label-sm text-primary font-semibold">0 / 4 gambar dipilih</span>
+                  <button type="button" id="post-clear-images-btn" onclick="clear_composer_images()" class="font-caption text-caption text-error hover:underline border-0 bg-transparent cursor-pointer p-0">
+                    Hapus semua
+                  </button>
+                </div>
+                <div id="post-image-preview-grid" class="composer-preview-grid"></div>
+              </div>
+
+              <!-- Hidden File Input -->
+              <input id="post-image-input"
+                     type="file"
+                     accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                     multiple
+                     class="hidden" />
+
+              <div class="flex items-center justify-between mt-space-sm pt-space-xs gap-2 flex-wrap">
                 <div class="flex items-center gap-space-xs text-on-surface-variant">
-                  <!-- TODO: Image, Poll, Emoji, Tag buttons not yet functional -->
+                  <button type="button"
+                          id="post-image-btn"
+                          onclick="$('#post-image-input').click()"
+                          class="flex items-center gap-1.5 px-space-sm py-1.5 hover:bg-surface-container hover:text-primary transition-colors rounded-full border-0 bg-transparent cursor-pointer text-on-surface-variant"
+                          title="Unggah Gambar (JPG, PNG, WebP · Maks. 4 gambar, 5 MB/gambar)">
+                    <span class="material-symbols-outlined text-[20px]">image</span>
+                    <span class="font-label-sm text-label-sm">Foto</span>
+                  </button>
+                  <span class="font-caption text-caption text-outline hidden sm:inline">Maks. 4 gambar (JPG/PNG/WebP · 5 MB)</span>
                 </div>
                 <button id="post-submit-btn"
-                        class="px-space-md py-space-xs bg-primary-container text-on-primary font-label-md text-label-md rounded-full hover:bg-primary shadow-sm active:scale-95 transition-all">
-                  Post
+                        type="button"
+                        class="px-space-md py-space-xs bg-primary-container text-on-primary font-label-md text-label-md rounded-full hover:bg-primary shadow-sm active:scale-95 transition-all border-0 cursor-pointer flex items-center gap-1.5">
+                  <span>Post</span>
                 </button>
               </div>
             </div>
@@ -316,37 +356,8 @@
     // Load personalized timeline posts on initial load
     get_posts('', 'following', '', false);
 
-    // ---- Create Post ----
-    $('#post-submit-btn').on('click', function () {
-      var content = $('#post-textarea').val().trim();
-      if (!content) {
-        alert('Post content cannot be empty.');
-        return;
-      }
-      var dateStr = new Date().toISOString();
-
-      $.ajax({
-        type: 'POST',
-        url: '/posting',
-        data: { comment_give: content, date_give: dateStr },
-        success: function (response) {
-          if (response.result === 'success') {
-            $('#post-textarea').val('');
-            // Reload current active feed tab
-            get_posts('', window.currentFeedTab || 'following', '', false);
-          } else {
-            alert('Failed to post: ' + (response.msg || 'Unknown error'));
-          }
-        },
-        error: function (xhr) {
-          if (xhr.status === 401) {
-            window.location.href = '/login';
-          } else {
-            alert('An error occurred while posting.');
-          }
-        }
-      });
-    });
+    // Initialize rich media composer (image preview & upload)
+    init_rich_post_composer();
 
     // Allow pressing Enter (without Shift) in textarea to submit
     $('#post-textarea').on('keydown', function (e) {

@@ -35,6 +35,69 @@ function sanitizeAvatarUrl(url) {
   return encodeURI('/static/' + url);
 }
 
+function sanitizePostImageUrl(url) {
+  if (!url || typeof url !== 'string') {
+    return '';
+  }
+  url = url.trim();
+  if (/^(javascript|data|vbscript):/i.test(url)) {
+    return '';
+  }
+  if (url.startsWith('/uploads/posts/') || url.startsWith('/static/')) {
+    return encodeURI(url);
+  }
+  return '';
+}
+
+window.postImagesRegistry = window.postImagesRegistry || {};
+
+function handle_post_image_error(imgEl) {
+  if (!imgEl || imgEl.dataset.fallbackApplied) return;
+  imgEl.dataset.fallbackApplied = '1';
+  const parent = imgEl.parentElement;
+  if (!parent) return;
+  imgEl.style.display = 'none';
+  const fallback = document.createElement('div');
+  fallback.className = 'post-image-fallback';
+  fallback.innerHTML = '<span class="material-symbols-outlined text-[24px]">broken_image</span><span>Gambar tidak tersedia</span>';
+  parent.appendChild(fallback);
+}
+
+function render_post_images_html(images, galleryKey, isCompact = false) {
+  if (!Array.isArray(images) || images.length === 0) {
+    return '';
+  }
+  const validImages = images
+    .map(img => ({
+      url: sanitizePostImageUrl(img && img.url ? img.url : ''),
+      filename: img && img.filename ? String(img.filename) : '',
+      mime_type: img && img.mime_type ? String(img.mime_type) : ''
+    }))
+    .filter(img => img.url !== '');
+
+  if (validImages.length === 0) {
+    return '';
+  }
+
+  const limited = validImages.slice(0, 4);
+  window.postImagesRegistry[galleryKey] = limited;
+
+  const count = limited.length;
+  const compactClass = isCompact ? ' post-media-grid-compact' : '';
+  let itemsHtml = '';
+  for (let i = 0; i < count; i++) {
+    const imgUrl = escapeHtml(limited[i].url);
+    const safeKey = escapeHtml(galleryKey);
+    itemsHtml += `
+      <div class="post-media-item" onclick="open_image_lightbox('${safeKey}', ${i}, event)">
+        <img src="${imgUrl}" alt="Lampiran gambar ${i + 1}" loading="lazy" onerror="handle_post_image_error(this)"/>
+      </div>
+    `;
+  }
+
+  return `<div class="post-media-grid post-media-grid-${count}${compactClass}">${itemsHtml}</div>`;
+}
+
 // --- Helper Formatting Waktu & Angka ---
 
 function time2str(date) {
@@ -206,6 +269,8 @@ function render_post_card(post, isStitch) {
   let display_comment_num = count_comments > 0 ? num2str(count_comments) : '0';
 
   let target_post_id = post['_id'];
+  let display_images = Array.isArray(post['images']) ? post['images'] : [];
+  let image_gallery_key = post['_id'];
   let repost_banner_stitch = '';
   let repost_banner_bulma = '';
   let quote_embed_stitch = '';
@@ -236,6 +301,8 @@ function render_post_card(post, isStitch) {
       comment_escaped = linkify_hashtags(comment_raw_escaped);
       time_before = time2str(new Date(orig['date']));
       is_edited = Boolean(orig['is_edited']);
+      display_images = Array.isArray(orig['images']) ? orig['images'] : [];
+      image_gallery_key = orig['_id'];
 
       class_heart = orig['heart_by_me'] ? 'fa-heart' : 'fa-heart-o';
       count_heart = orig['count_heart'] || 0;
@@ -249,6 +316,7 @@ function render_post_card(post, isStitch) {
       repost_by_me = Boolean(orig['repost_by_me']);
       is_bookmarked = Boolean(orig['is_bookmarked']);
     } else {
+      display_images = [];
       comment_escaped = '<span class="italic text-on-surface-variant font-body-sm">Postingan asli telah dihapus atau tidak tersedia.</span>';
     }
   } else if (post_type === 'quote') {
@@ -268,8 +336,9 @@ function render_post_card(post, isStitch) {
       `;
     } else {
       let orig_quote_comment = linkify_hashtags(escapeHtml(orig['comment']));
+      let orig_quote_images_html = render_post_images_html(orig['images'] || [], `quote-orig-${post['_id']}`, true);
       quote_embed_stitch = `
-        <div class="mt-2 mb-space-md p-3.5 rounded-xl border border-outline-variant/60 bg-surface-container-low/60 hover:bg-surface-container-low transition-colors cursor-pointer" onclick="window.location.href='/user/${encodeURIComponent(orig.username)}#${orig._id}'">
+        <div class="mt-2 mb-space-md p-3.5 rounded-xl border border-outline-variant/60 bg-surface-container-low/60 hover:bg-surface-container-low transition-colors cursor-pointer" onclick="window.location.href='/post/${encodeURIComponent(orig._id)}'">
           <div class="flex items-center gap-2 mb-1.5">
             <img src="${sanitizeAvatarUrl(orig.profile_pic_real)}" alt="${escapeHtml(orig.profile_name)}" class="w-5 h-5 rounded-full object-cover shrink-0" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
             <span class="font-label-sm font-semibold text-on-surface">${escapeHtml(orig.profile_name)}</span>
@@ -277,11 +346,12 @@ function render_post_card(post, isStitch) {
             <span class="font-caption text-on-surface-variant">·</span>
             <span class="font-caption text-on-surface-variant">${time2str(new Date(orig.date))}</span>
           </div>
-          <p class="font-body-sm text-on-surface whitespace-pre-wrap leading-relaxed m-0 line-clamp-4">${orig_quote_comment}</p>
+          ${orig_quote_comment ? `<p class="font-body-sm text-on-surface whitespace-pre-wrap leading-relaxed m-0 line-clamp-4">${orig_quote_comment}</p>` : ''}
+          ${orig_quote_images_html}
         </div>
       `;
       quote_embed_bulma = `
-        <div class="box is-light p-3 mt-2 mb-3" style="border: 1px solid #dbdbdb; border-radius: 8px; cursor: pointer;" onclick="window.location.href='/user/${encodeURIComponent(orig.username)}#${orig._id}'">
+        <div class="box is-light p-3 mt-2 mb-3" style="border: 1px solid #dbdbdb; border-radius: 8px; cursor: pointer;" onclick="window.location.href='/post/${encodeURIComponent(orig._id)}'">
           <div class="is-flex is-align-items-center mb-1">
             <figure class="image is-20x20 mr-2">
               <img class="is-rounded" src="${sanitizeAvatarUrl(orig.profile_pic_real)}" onerror="this.src='/static/profile_pics/profile_placeholder.png'">
@@ -289,11 +359,14 @@ function render_post_card(post, isStitch) {
             <strong class="is-size-7">${escapeHtml(orig.profile_name)}</strong>
             <small class="has-text-grey ml-1 is-size-7">@${escapeHtml(orig.username)} · ${time2str(new Date(orig.date))}</small>
           </div>
-          <p class="is-size-7">${orig_quote_comment}</p>
+          ${orig_quote_comment ? `<p class="is-size-7">${orig_quote_comment}</p>` : ''}
+          ${orig_quote_images_html}
         </div>
       `;
     }
   }
+
+  let post_images_html = render_post_images_html(display_images, image_gallery_key, false);
 
   if (isStitch) {
     let edited_badge = is_edited
@@ -340,7 +413,7 @@ function render_post_card(post, isStitch) {
             <div class="flex items-center gap-space-xs text-on-surface-variant font-caption text-caption">
               <span>@${username_escaped}</span>
               <span>·</span>
-              <span>${time_before}</span>
+              <a href="/post/${encodeURIComponent(target_post_id)}" class="text-inherit hover:underline no-underline">${time_before}</a>
               ${edited_badge}
             </div>
           </div>
@@ -349,9 +422,10 @@ function render_post_card(post, isStitch) {
       </div>
 
       <!-- Post Body -->
-      <p class="font-body-md text-body-md text-on-surface mb-space-md leading-relaxed whitespace-pre-wrap" id="post-text-${post['_id']}">
-        ${comment_escaped}
-      </p>
+      <p class="font-body-md text-body-md text-on-surface ${comment_escaped ? 'mb-space-sm' : 'hidden'} leading-relaxed whitespace-pre-wrap" id="post-text-${post['_id']}">${comment_escaped}</p>
+
+      <!-- Post Media -->
+      <div id="post-media-${post['_id']}">${post_images_html}</div>
 
       ${quote_embed_stitch}
 
@@ -359,9 +433,19 @@ function render_post_card(post, isStitch) {
       ${post_type !== 'repost' ? `
       <div id="edit-box-${post['_id']}" class="hidden mb-space-md bg-surface-container-low p-space-sm rounded-lg">
         <textarea id="edit-textarea-${post['_id']}" class="w-full bg-surface-container-lowest rounded-lg p-space-sm font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary-container resize-none transition-all" rows="3" maxlength="5000">${comment_raw_escaped}</textarea>
-        <div class="flex items-center justify-end gap-space-xs mt-space-xs">
-          <button type="button" onclick="cancel_edit_post('${post['_id']}')" class="px-space-sm py-1 font-label-sm text-label-sm text-on-surface-variant hover:bg-surface-container-high rounded-full border-0 bg-transparent cursor-pointer">Batal</button>
-          <button type="button" onclick="submit_edit_post('${post['_id']}')" class="px-space-md py-1 bg-primary-container text-on-primary font-label-sm text-label-sm rounded-full hover:bg-primary transition-colors border-0 cursor-pointer btn-save-edit">Simpan</button>
+        <div id="edit-images-section-${post['_id']}" class="mt-space-xs"></div>
+        <div class="flex items-center justify-between gap-space-xs mt-space-xs">
+          <div class="flex items-center gap-2">
+            <input type="file" id="edit-image-input-${post['_id']}" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple class="hidden" onchange="handle_edit_image_select('${post['_id']}', this)"/>
+            <button type="button" onclick="$('#edit-image-input-${post['_id']}').click()" class="px-space-sm py-1 font-label-sm text-label-sm text-on-surface-variant hover:bg-surface-container-high hover:text-primary rounded-full border-0 bg-transparent cursor-pointer flex items-center gap-1" title="Tambah / Ubah Gambar">
+              <span class="material-symbols-outlined text-[16px]">image</span>
+              <span>Gambar</span>
+            </button>
+          </div>
+          <div class="flex items-center gap-space-xs">
+            <button type="button" onclick="cancel_edit_post('${post['_id']}')" class="px-space-sm py-1 font-label-sm text-label-sm text-on-surface-variant hover:bg-surface-container-high rounded-full border-0 bg-transparent cursor-pointer">Batal</button>
+            <button type="button" onclick="submit_edit_post('${post['_id']}')" class="px-space-md py-1 bg-primary-container text-on-primary font-label-sm text-label-sm rounded-full hover:bg-primary transition-colors border-0 cursor-pointer btn-save-edit">Simpan</button>
+          </div>
         </div>
       </div>` : ''}
 
@@ -474,16 +558,20 @@ function render_post_card(post, isStitch) {
           <div class="content">
             <p id="post-text-${post['_id']}">
               <strong>${profile_name_escaped}</strong> <small>@${username_escaped}</small>
-              <small>${time_before}</small>
+              <a href="/post/${encodeURIComponent(target_post_id)}" class="has-text-grey"><small>${time_before}</small></a>
               ${edited_badge_bulma}
               <br/>
               ${comment_escaped}
             </p>
+            <div id="post-media-${post['_id']}">${post_images_html}</div>
             ${quote_embed_bulma}
             ${post_type !== 'repost' ? `
             <div id="edit-box-${post['_id']}" class="is-hidden mb-3">
               <textarea id="edit-textarea-${post['_id']}" class="textarea is-small" rows="3" maxlength="5000">${comment_raw_escaped}</textarea>
+              <div id="edit-images-section-${post['_id']}" class="mt-2"></div>
               <div class="buttons is-right mt-1">
+                <input type="file" id="edit-image-input-${post['_id']}" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple class="is-hidden" onchange="handle_edit_image_select('${post['_id']}', this)"/>
+                <button type="button" class="button is-small is-light" onclick="$('#edit-image-input-${post['_id']}').click()">Gambar</button>
                 <button type="button" class="button is-small is-light" onclick="cancel_edit_post('${post['_id']}')">Batal</button>
                 <button type="button" class="button is-small is-sparta btn-save-edit" onclick="submit_edit_post('${post['_id']}')">Simpan</button>
               </div>
@@ -1432,21 +1520,136 @@ function toggle_bookmark(post_id) {
   });
 }
 
+window.editPostImageState = window.editPostImageState || {};
+
+function _clear_edit_image_previews(post_id) {
+  const state = window.editPostImageState[post_id];
+  if (state && Array.isArray(state.newItems)) {
+    state.newItems.forEach(item => {
+      if (item.objectUrl) {
+        try { URL.revokeObjectURL(item.objectUrl); } catch (e) {}
+      }
+    });
+  }
+  delete window.editPostImageState[post_id];
+}
+
+function render_edit_images_preview(post_id) {
+  const state = window.editPostImageState[post_id];
+  const $container = $(`#edit-images-section-${post_id}`);
+  if (!$container.length || !state) return;
+
+  const total = state.kept.length + state.newItems.length;
+  if (total === 0) {
+    $container.empty();
+    return;
+  }
+
+  let html = `<div class="composer-preview-grid">`;
+  state.kept.forEach((img, idx) => {
+    const safeUrl = escapeHtml(sanitizePostImageUrl(img.url));
+    html += `
+      <div class="composer-preview-item">
+        <img src="${safeUrl}" alt="Gambar tersimpan ${idx + 1}"/>
+        <button type="button" class="composer-preview-remove" onclick="remove_edit_kept_image('${post_id}', '${escapeHtml(img.filename)}')" title="Hapus gambar">&times;</button>
+      </div>
+    `;
+  });
+  state.newItems.forEach((item) => {
+    html += `
+      <div class="composer-preview-item">
+        <img src="${item.objectUrl}" alt="Gambar baru"/>
+        <button type="button" class="composer-preview-remove" onclick="remove_edit_new_image('${post_id}', '${item.id}')" title="Hapus gambar">&times;</button>
+      </div>
+    `;
+  });
+  html += `</div><p class="font-caption text-caption text-on-surface-variant mt-1 mb-0">${total} / 4 gambar</p>`;
+  $container.html(html);
+}
+
+function remove_edit_kept_image(post_id, filename) {
+  const state = window.editPostImageState[post_id];
+  if (!state) return;
+  state.kept = state.kept.filter(img => img.filename !== filename);
+  render_edit_images_preview(post_id);
+}
+
+function remove_edit_new_image(post_id, itemId) {
+  const state = window.editPostImageState[post_id];
+  if (!state) return;
+  const target = state.newItems.find(x => x.id === itemId);
+  if (target && target.objectUrl) {
+    try { URL.revokeObjectURL(target.objectUrl); } catch (e) {}
+  }
+  state.newItems = state.newItems.filter(x => x.id !== itemId);
+  render_edit_images_preview(post_id);
+}
+
+function handle_edit_image_select(post_id, inputEl) {
+  const files = Array.from(inputEl.files || []);
+  inputEl.value = '';
+  if (!files.length) return;
+
+  const state = window.editPostImageState[post_id];
+  if (!state) return;
+
+  const maxCount = 4;
+  const maxBytes = 5 * 1024 * 1024;
+  const allowedExts = ['jpg', 'jpeg', 'png', 'webp'];
+  const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
+
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    if (state.kept.length + state.newItems.length >= maxCount) {
+      alert(`Maksimal ${maxCount} gambar dalam satu postingan.`);
+      break;
+    }
+    const ext = (f.name.split('.').pop() || '').toLowerCase();
+    if (!allowedExts.includes(ext) || (f.type && !allowedMimes.includes(f.type))) {
+      alert(`Format "${f.name}" tidak didukung. Gunakan JPG, JPEG, PNG, atau WebP.`);
+      continue;
+    }
+    if (f.size <= 0 || f.size > maxBytes) {
+      alert(`Ukuran "${f.name}" tidak valid (maksimal 5 MB, tidak boleh kosong).`);
+      continue;
+    }
+    state.newItems.push({
+      id: 'edit_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+      file: f,
+      objectUrl: URL.createObjectURL(f)
+    });
+  }
+  render_edit_images_preview(post_id);
+}
+
 function open_edit_post(post_id) {
+  const cached = window.postsCache ? window.postsCache[post_id] : null;
+  const existingImages = (cached && Array.isArray(cached.images)) ? cached.images : [];
+  _clear_edit_image_previews(post_id);
+  window.editPostImageState[post_id] = {
+    kept: existingImages.map(img => ({ ...img })),
+    newItems: []
+  };
+  render_edit_images_preview(post_id);
+
   $(`#post-text-${post_id}`).addClass('hidden').hide();
   $(`#edit-box-${post_id}`).removeClass('hidden is-hidden').show();
   $(`#edit-textarea-${post_id}`).focus();
 }
 
 function cancel_edit_post(post_id) {
+  _clear_edit_image_previews(post_id);
   $(`#edit-box-${post_id}`).addClass('hidden is-hidden').hide();
   $(`#post-text-${post_id}`).removeClass('hidden').show();
 }
 
 function submit_edit_post(post_id) {
   let newContent = $(`#edit-textarea-${post_id}`).val().trim();
-  if (!newContent) {
-    alert('Isi postingan tidak boleh kosong.');
+  const state = window.editPostImageState[post_id];
+  const imgCount = state ? (state.kept.length + state.newItems.length) : 0;
+
+  if (!newContent && imgCount === 0) {
+    alert('Isi postingan atau minimal satu gambar wajib ada.');
     return;
   }
   if (newContent.length > 5000) {
@@ -1457,16 +1660,52 @@ function submit_edit_post(post_id) {
   let $btn = $(`#edit-box-${post_id} button.btn-save-edit`);
   $btn.prop('disabled', true).text('Menyimpan...');
 
+  let ajaxOpts;
+  if (state) {
+    const fd = new FormData();
+    fd.append('post_id_give', post_id);
+    fd.append('comment_give', newContent);
+    fd.append('keep_images', JSON.stringify(state.kept.map(img => img.filename)));
+    state.newItems.forEach(item => fd.append('images', item.file));
+    ajaxOpts = {
+      type: 'POST',
+      url: `/api/posts/${encodeURIComponent(post_id)}/edit`,
+      data: fd,
+      contentType: false,
+      processData: false
+    };
+  } else {
+    ajaxOpts = {
+      type: 'POST',
+      url: `/api/posts/${encodeURIComponent(post_id)}/edit`,
+      data: {
+        post_id_give: post_id,
+        comment_give: newContent
+      }
+    };
+  }
+
   $.ajax({
-    type: 'POST',
-    url: `/api/posts/${encodeURIComponent(post_id)}/edit`,
-    data: {
-      post_id_give: post_id,
-      comment_give: newContent
-    },
+    ...ajaxOpts,
     success: function (res) {
       if (res.result === 'success') {
-        $(`#post-text-${post_id}`).text(res.comment || newContent).removeClass('hidden').show();
+        const updatedComment = res.comment !== undefined ? res.comment : newContent;
+        const updatedImages = Array.isArray(res.images) ? res.images : [];
+        if (window.postsCache && window.postsCache[post_id]) {
+          window.postsCache[post_id].comment = updatedComment;
+          window.postsCache[post_id].images = updatedImages;
+          window.postsCache[post_id].is_edited = true;
+        }
+        const renderedText = linkify_hashtags(escapeHtml(updatedComment));
+        const $textEl = $(`#post-text-${post_id}`);
+        $textEl.html(renderedText);
+        if (updatedComment) {
+          $textEl.removeClass('hidden').show();
+        } else {
+          $textEl.addClass('hidden').hide();
+        }
+        $(`#post-media-${post_id}`).html(render_post_images_html(updatedImages, post_id, false));
+        _clear_edit_image_previews(post_id);
         $(`#edit-box-${post_id}`).addClass('hidden is-hidden').hide();
         $(`#edited-badge-${post_id}`).removeClass('hidden is-hidden').show();
       } else {
@@ -1955,7 +2194,7 @@ function open_quote_modal(postId) {
     $('#quote-preview-avatar').attr('src', sanitizeAvatarUrl(p.profile_pic_real));
     $('#quote-preview-name').text(p.profile_name || p.username);
     $('#quote-preview-username').text(`@${p.username}`);
-    $('#quote-preview-comment').text(p.comment || '');
+    $('#quote-preview-comment').text(p.comment || (p.images && p.images.length ? `[${p.images.length} Gambar]` : ''));
     $('#quote-preview-card').removeClass('hidden is-hidden');
   } else {
     $('#quote-preview-card').addClass('hidden is-hidden');
@@ -2546,6 +2785,354 @@ function execute_explore_search(query) {
     },
     error: function (xhr) {
       handle_ajax_error(xhr, 'Gagal melakukan pencarian.');
+    }
+  });
+}
+
+// ==========================================
+// RICH MEDIA POST COMPOSER (UPLOAD & PREVIEW)
+// ==========================================
+
+window.composerImages = [];
+const COMPOSER_MAX_IMAGES = 4;
+const COMPOSER_MAX_SIZE_BYTES = 5 * 1024 * 1024;
+const COMPOSER_ALLOWED_EXTS = ['jpg', 'jpeg', 'png', 'webp'];
+const COMPOSER_ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+
+function show_composer_error(msg) {
+  $('#post-composer-error-text').text(msg);
+  $('#post-composer-error').removeClass('hidden');
+}
+
+function hide_composer_error() {
+  $('#post-composer-error').addClass('hidden');
+  $('#post-composer-error-text').text('');
+}
+
+function render_composer_previews() {
+  const $container = $('#post-image-preview-container');
+  const $grid = $('#post-image-preview-grid');
+  const $countLabel = $('#post-image-count-label');
+
+  if (!window.composerImages.length) {
+    $container.addClass('hidden');
+    $grid.empty();
+    $countLabel.text(`0 / ${COMPOSER_MAX_IMAGES} gambar dipilih`);
+    $('#post-image-btn').prop('disabled', false).removeClass('opacity-50 cursor-not-allowed');
+    return;
+  }
+
+  $countLabel.text(`${window.composerImages.length} / ${COMPOSER_MAX_IMAGES} gambar dipilih`);
+  $grid.empty();
+  window.composerImages.forEach((item, index) => {
+    const $card = $(`
+      <div class="composer-preview-item" data-image-id="${escapeHtml(item.id)}">
+        <img src="${item.objectUrl}" alt="Preview ${index + 1}"/>
+        <button type="button"
+                class="composer-preview-remove"
+                aria-label="Hapus gambar ${index + 1}"
+                title="Hapus gambar"
+                onclick="remove_composer_image('${escapeHtml(item.id)}')">&times;</button>
+      </div>
+    `);
+    $grid.append($card);
+  });
+
+  $container.removeClass('hidden');
+  if (window.composerImages.length >= COMPOSER_MAX_IMAGES) {
+    $('#post-image-btn').prop('disabled', true).addClass('opacity-50 cursor-not-allowed');
+  } else {
+    $('#post-image-btn').prop('disabled', false).removeClass('opacity-50 cursor-not-allowed');
+  }
+}
+
+function remove_composer_image(itemId) {
+  const idx = window.composerImages.findIndex(x => x.id === itemId);
+  if (idx !== -1) {
+    const removed = window.composerImages[idx];
+    if (removed.objectUrl) {
+      try { URL.revokeObjectURL(removed.objectUrl); } catch (e) {}
+    }
+    window.composerImages.splice(idx, 1);
+  }
+  hide_composer_error();
+  render_composer_previews();
+}
+
+function clear_composer_images() {
+  window.composerImages.forEach(item => {
+    if (item.objectUrl) {
+      try { URL.revokeObjectURL(item.objectUrl); } catch (e) {}
+    }
+  });
+  window.composerImages = [];
+  const fileInput = document.getElementById('post-image-input');
+  if (fileInput) fileInput.value = '';
+  render_composer_previews();
+}
+
+function submit_rich_post() {
+  hide_composer_error();
+  const content = ($('#post-textarea').val() || '').trim();
+  const hasImages = window.composerImages.length > 0;
+
+  if (!content && !hasImages) {
+    show_composer_error('Tulis isi postingan atau pilih minimal satu gambar.');
+    $('#post-textarea').focus();
+    return;
+  }
+
+  if (content.length > 5000) {
+    show_composer_error('Panjang postingan maksimal 5.000 karakter.');
+    return;
+  }
+
+  if (window.composerImages.length > COMPOSER_MAX_IMAGES) {
+    show_composer_error(`Maksimal ${COMPOSER_MAX_IMAGES} gambar per postingan.`);
+    return;
+  }
+
+  const $btn = $('#post-submit-btn');
+  const originalHtml = $btn.html();
+  $btn.prop('disabled', true).addClass('opacity-75 cursor-not-allowed')
+      .html('<i class="fa fa-spinner fa-spin text-[13px]"></i><span>Mengunggah...</span>');
+
+  const formData = new FormData();
+  formData.append('comment_give', content);
+  formData.append('date_give', new Date().toISOString());
+  window.composerImages.forEach(item => {
+    formData.append('images', item.file);
+  });
+
+  $.ajax({
+    type: 'POST',
+    url: '/posting',
+    data: formData,
+    contentType: false,
+    processData: false,
+    success: function (response) {
+      if (response.result === 'success') {
+        $('#post-textarea').val('');
+        clear_composer_images();
+        hide_composer_error();
+        get_posts('', window.currentFeedTab || 'following', '', false);
+      } else {
+        show_composer_error(response.msg || 'Gagal membuat postingan.');
+      }
+    },
+    error: function (xhr) {
+      if (xhr.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      let msg = 'Terjadi kesalahan saat mengunggah postingan.';
+      if (xhr.responseJSON && xhr.responseJSON.msg) {
+        msg = xhr.responseJSON.msg;
+      }
+      show_composer_error(msg);
+    },
+    complete: function () {
+      $btn.prop('disabled', false).removeClass('opacity-75 cursor-not-allowed').html(originalHtml);
+    }
+  });
+}
+
+function init_rich_post_composer() {
+  const $fileInput = $('#post-image-input');
+  if ($fileInput.length) {
+    $fileInput.on('change', function () {
+      const files = Array.from(this.files || []);
+      // Reset agar user bisa memilih ulang file yang sama setelah dihapus
+      this.value = '';
+      if (!files.length) return;
+
+      hide_composer_error();
+      const errors = [];
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (window.composerImages.length >= COMPOSER_MAX_IMAGES) {
+          errors.push(`Maksimal ${COMPOSER_MAX_IMAGES} gambar dalam satu postingan.`);
+          break;
+        }
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        if (!COMPOSER_ALLOWED_EXTS.includes(ext) || (file.type && !COMPOSER_ALLOWED_MIMES.includes(file.type))) {
+          errors.push(`Format "${file.name}" tidak didukung (gunakan JPG, JPEG, PNG, atau WebP).`);
+          continue;
+        }
+        if (file.size <= 0) {
+          errors.push(`File "${file.name}" kosong.`);
+          continue;
+        }
+        if (file.size > COMPOSER_MAX_SIZE_BYTES) {
+          errors.push(`Ukuran "${file.name}" melebihi batas 5 MB.`);
+          continue;
+        }
+
+        const objectUrl = URL.createObjectURL(file);
+        window.composerImages.push({
+          id: 'img_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+          file: file,
+          objectUrl: objectUrl
+        });
+      }
+
+      if (errors.length) {
+        show_composer_error(errors[0]);
+      }
+      render_composer_previews();
+    });
+  }
+
+  $('#post-submit-btn').off('click').on('click', function () {
+    submit_rich_post();
+  });
+
+  $(window).on('beforeunload', function () {
+    clear_composer_images();
+  });
+}
+
+// ==========================================
+// IMAGE VIEWER / LIGHTBOX
+// ==========================================
+
+window.lightboxState = {
+  images: [],
+  index: 0,
+  isOpen: false
+};
+
+function ensure_lightbox_dom() {
+  if ($('#sweeter-lightbox').length) return;
+  const html = `
+    <div id="sweeter-lightbox" class="sweeter-lightbox hidden" role="dialog" aria-modal="true" aria-label="Image Viewer" onclick="handle_lightbox_backdrop_click(event)">
+      <div id="sweeter-lightbox-counter" class="sweeter-lightbox-counter hidden">1 / 1</div>
+      <button type="button" id="sweeter-lightbox-close" class="sweeter-lightbox-btn sweeter-lightbox-close" aria-label="Tutup viewer" onclick="close_image_lightbox()">
+        <span class="material-symbols-outlined text-[24px]">close</span>
+      </button>
+      <button type="button" id="sweeter-lightbox-prev" class="sweeter-lightbox-btn sweeter-lightbox-prev hidden" aria-label="Gambar sebelumnya" onclick="lightbox_prev(event)">
+        <span class="material-symbols-outlined text-[28px]">chevron_left</span>
+      </button>
+      <div class="sweeter-lightbox-content" id="sweeter-lightbox-content">
+        <img id="sweeter-lightbox-img" class="sweeter-lightbox-img" src="" alt="Preview gambar" onerror="handle_lightbox_image_error()"/>
+        <div id="sweeter-lightbox-fallback" class="hidden post-image-fallback bg-surface-container-lowest p-8 rounded-xl">
+          <span class="material-symbols-outlined text-[36px]">broken_image</span>
+          <span>Gambar gagal dimuat atau tidak tersedia</span>
+        </div>
+      </div>
+      <button type="button" id="sweeter-lightbox-next" class="sweeter-lightbox-btn sweeter-lightbox-next hidden" aria-label="Gambar berikutnya" onclick="lightbox_next(event)">
+        <span class="material-symbols-outlined text-[28px]">chevron_right</span>
+      </button>
+    </div>
+  `;
+  $('body').append(html);
+}
+
+function render_lightbox_slide() {
+  const images = window.lightboxState.images;
+  const idx = window.lightboxState.index;
+  if (!images || !images.length) return;
+
+  const current = images[idx];
+  const $img = $('#sweeter-lightbox-img');
+  const $fallback = $('#sweeter-lightbox-fallback');
+  $fallback.addClass('hidden');
+  $img.removeClass('hidden').attr('src', current.url);
+
+  if (images.length > 1) {
+    $('#sweeter-lightbox-counter').text(`${idx + 1} / ${images.length}`).removeClass('hidden');
+    $('#sweeter-lightbox-prev').removeClass('hidden');
+    $('#sweeter-lightbox-next').removeClass('hidden');
+  } else {
+    $('#sweeter-lightbox-counter').addClass('hidden');
+    $('#sweeter-lightbox-prev').addClass('hidden');
+    $('#sweeter-lightbox-next').addClass('hidden');
+  }
+}
+
+function handle_lightbox_image_error() {
+  $('#sweeter-lightbox-img').addClass('hidden');
+  $('#sweeter-lightbox-fallback').removeClass('hidden');
+}
+
+function open_image_lightbox(galleryKey, startIndex, event) {
+  if (event) {
+    event.stopPropagation();
+  }
+  const images = (window.postImagesRegistry && window.postImagesRegistry[galleryKey]) || [];
+  if (!images.length) return;
+
+  ensure_lightbox_dom();
+  window.lightboxState.images = images;
+  window.lightboxState.index = Math.max(0, Math.min(startIndex || 0, images.length - 1));
+  window.lightboxState.isOpen = true;
+
+  render_lightbox_slide();
+  $('#sweeter-lightbox').removeClass('hidden');
+  $('body').css('overflow', 'hidden');
+}
+
+function close_image_lightbox() {
+  window.lightboxState.isOpen = false;
+  $('#sweeter-lightbox').addClass('hidden');
+  $('#sweeter-lightbox-img').attr('src', '');
+  $('body').css('overflow', '');
+}
+
+function lightbox_prev(event) {
+  if (event) event.stopPropagation();
+  const len = window.lightboxState.images.length;
+  if (len <= 1) return;
+  window.lightboxState.index = (window.lightboxState.index - 1 + len) % len;
+  render_lightbox_slide();
+}
+
+function lightbox_next(event) {
+  if (event) event.stopPropagation();
+  const len = window.lightboxState.images.length;
+  if (len <= 1) return;
+  window.lightboxState.index = (window.lightboxState.index + 1) % len;
+  render_lightbox_slide();
+}
+
+function handle_lightbox_backdrop_click(event) {
+  if (event.target && (event.target.id === 'sweeter-lightbox' || event.target.id === 'sweeter-lightbox-content')) {
+    close_image_lightbox();
+  }
+}
+
+$(document).on('keydown', function (e) {
+  if (!window.lightboxState || !window.lightboxState.isOpen) return;
+  if (e.key === 'Escape') {
+    e.stopImmediatePropagation();
+    close_image_lightbox();
+  } else if (e.key === 'ArrowLeft') {
+    lightbox_prev();
+  } else if (e.key === 'ArrowRight') {
+    lightbox_next();
+  }
+});
+
+// ==========================================
+// SINGLE POST DETAIL LOADER
+// ==========================================
+
+function load_single_post_detail(postId) {
+  if (!postId) return;
+  $.ajax({
+    type: 'GET',
+    url: `/api/posts/${encodeURIComponent(postId)}`,
+    success: function (res) {
+      if (res.result === 'success' && res.post) {
+        $('#post-box').html(render_post_card(res.post, true));
+        toggle_comments(res.post._id);
+      } else {
+        $('#post-box').html('<div class="p-6 bg-surface-container-lowest rounded-xl text-center text-on-surface-variant">Postingan tidak ditemukan.</div>');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal memuat detail postingan.');
     }
   });
 }

@@ -32,3 +32,5 @@ htmlcov/
 # Local uploads
 static/profile_pics/*
 !static/profile_pics/.gitkeep
+uploads/posts/*
+!uploads/posts/.gitkeep

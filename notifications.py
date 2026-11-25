@@ -177,7 +177,7 @@ def get_user_notifications(username: str, cursor: str = None, limit: int = 20):
     post_ids = [ObjectId(n['post_id']) for n in notif_docs if n.get('post_id') and ObjectId.is_valid(n['post_id'])]
     posts_map = {}
     if post_ids:
-        post_cursor = db.posts.find({'_id': {'$in': post_ids}}, {'comment': 1})
+        post_cursor = db.posts.find({'_id': {'$in': post_ids}}, {'comment': 1, 'images': 1})
         posts_map = {str(p['_id']): p for p in post_cursor}
 
     enriched_notifs = []
@@ -188,9 +188,13 @@ def get_user_notifications(username: str, cursor: str = None, limit: int = 20):
         post_doc = posts_map.get(post_id_str) if post_id_str else None
 
         post_snippet = None
-        if post_doc and 'comment' in post_doc:
-            full_comment = post_doc['comment']
-            post_snippet = full_comment[:60] + ('...' if len(full_comment) > 60 else '')
+        if post_doc:
+            full_comment = post_doc.get('comment') or ''
+            if full_comment:
+                post_snippet = full_comment[:60] + ('...' if len(full_comment) > 60 else '')
+            elif post_doc.get('images'):
+                img_count = len(post_doc.get('images') or [])
+                post_snippet = f"[{img_count} Gambar]"
 
         enriched_notifs.append({
             '_id': nid,

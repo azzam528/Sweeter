@@ -186,3 +186,291 @@ input::-webkit-calendar-indicator {
         padding-left: 0.35rem !important;
     }
 }
+
+/* ========================================================
+   RICH MEDIA POSTS: IMAGE GRIDS, PREVIEW & LIGHTBOX
+   ======================================================== */
+
+.post-media-grid {
+    display: grid;
+    gap: 6px;
+    width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 0.75rem;
+}
+
+.post-media-grid-compact {
+    margin-top: 0.5rem;
+    margin-bottom: 0.25rem;
+    border-radius: 10px;
+}
+
+.post-media-grid-1 {
+    grid-template-columns: 1fr;
+}
+
+.post-media-grid-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.post-media-grid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, 165px);
+}
+
+.post-media-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, 175px);
+}
+
+.post-media-item {
+    position: relative;
+    overflow: hidden;
+    background-color: #f4f3f1;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.post-media-grid-1 .post-media-item {
+    max-height: 460px;
+}
+
+.post-media-grid-1 .post-media-item img {
+    width: 100%;
+    height: auto;
+    max-height: 460px;
+    object-fit: cover;
+    display: block;
+}
+
+.post-media-grid-2 .post-media-item {
+    height: 240px;
+}
+
+.post-media-grid-3 .post-media-item:first-child {
+    grid-row: span 2;
+    height: 100%;
+}
+
+.post-media-grid-3 .post-media-item:not(:first-child) {
+    height: 100%;
+}
+
+.post-media-grid-4 .post-media-item {
+    height: 100%;
+}
+
+.post-media-grid-2 .post-media-item img,
+.post-media-grid-3 .post-media-item img,
+.post-media-grid-4 .post-media-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.post-media-item img {
+    transition: transform 0.22s ease;
+}
+
+.post-media-item:hover img {
+    transform: scale(1.015);
+}
+
+.post-media-grid-compact.post-media-grid-1 .post-media-item {
+    max-height: 260px;
+}
+
+.post-media-grid-compact.post-media-grid-1 .post-media-item img {
+    max-height: 260px;
+}
+
+.post-media-grid-compact.post-media-grid-2 .post-media-item {
+    height: 160px;
+}
+
+.post-media-grid-compact.post-media-grid-3 {
+    grid-template-rows: repeat(2, 115px);
+}
+
+.post-media-grid-compact.post-media-grid-4 {
+    grid-template-rows: repeat(2, 125px);
+}
+
+.post-image-fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 100%;
+    height: 100%;
+    min-height: 120px;
+    padding: 1rem;
+    background-color: #f4f3f1;
+    color: #837373;
+    font-size: 0.78rem;
+    text-align: center;
+    border: 1px dashed #d5c2c1;
+    border-radius: 8px;
+    box-sizing: border-box;
+}
+
+/* Composer Preview Grid */
+.composer-preview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 8px;
+}
+
+.composer-preview-item {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid #e3e2e0;
+    background-color: #f4f3f1;
+}
+
+.composer-preview-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.composer-preview-remove {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 24px;
+    height: 24px;
+    border-radius: 9999px;
+    background: rgba(26, 28, 27, 0.78);
+    color: #ffffff;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    transition: background-color 0.15s ease;
+}
+
+.composer-preview-remove:hover {
+    background: #ba1a1a;
+}
+
+/* Image Viewer / Lightbox */
+.sweeter-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(15, 12, 12, 0.92);
+    backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.sweeter-lightbox.hidden {
+    display: none !important;
+}
+
+.sweeter-lightbox-content {
+    position: relative;
+    max-width: 92vw;
+    max-height: 86vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sweeter-lightbox-img {
+    max-width: 90vw;
+    max-height: 84vh;
+    object-fit: contain;
+    border-radius: 10px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    user-select: none;
+}
+
+.sweeter-lightbox-btn {
+    position: fixed;
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 9999px;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color 0.15s ease, transform 0.15s ease;
+    z-index: 10001;
+}
+
+.sweeter-lightbox-btn:hover {
+    background: rgba(255, 255, 255, 0.28);
+    transform: scale(1.06);
+}
+
+.sweeter-lightbox-close {
+    top: 18px;
+    right: 20px;
+}
+
+.sweeter-lightbox-prev {
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.sweeter-lightbox-prev:hover {
+    transform: translateY(-50%) scale(1.06);
+}
+
+.sweeter-lightbox-next {
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.sweeter-lightbox-next:hover {
+    transform: translateY(-50%) scale(1.06);
+}
+
+.sweeter-lightbox-counter {
+    position: fixed;
+    top: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 5px 14px;
+    border-radius: 9999px;
+    background: rgba(26, 28, 27, 0.78);
+    color: #ffffff;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    z-index: 10001;
+}
+
+@media screen and (max-width: 640px) {
+    .post-media-grid-2 .post-media-item {
+        height: 175px;
+    }
+    .post-media-grid-3 {
+        grid-template-rows: repeat(2, 130px);
+    }
+    .post-media-grid-4 {
+        grid-template-rows: repeat(2, 140px);
+    }
+    .sweeter-lightbox-btn {
+        width: 38px;
+        height: 38px;
+    }
+}

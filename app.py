@@ -1,5 +1,6 @@
 import os
 import re
+import uuid
 import hashlib
 import jwt
 import warnings
@@ -16,6 +17,8 @@ from flask import (
     request,
     redirect,
     url_for,
+    send_from_directory,
+    abort,
 )
 
 from werkzeug.utils import secure_filename
@@ -48,6 +51,19 @@ app = Flask(__name__)
 
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["UPLOAD_FOLDER"] = "./static/profile_pics"
+
+# Konfigurasi Upload Media Postingan (dapat dikonfigurasi via env var untuk deployment/Docker)
+DEFAULT_POST_UPLOAD_DIR = os.path.join(app.root_path, "uploads", "posts")
+app.config["POST_UPLOAD_DIR"] = os.path.abspath(
+    os.getenv("POST_UPLOAD_DIR") or DEFAULT_POST_UPLOAD_DIR
+)
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25 MB total request limit (4 x 5MB + overhead)
+
+ALLOWED_POST_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
+ALLOWED_POST_IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp"}
+MAX_POST_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MB per gambar
+MAX_POST_IMAGES_COUNT = 4
+SAFE_POST_IMAGE_FILENAME_RE = re.compile(r"^[a-f0-9]{32}_[0-9]+\.(?:jpg|jpeg|png|webp)$")
 
 # ==========================================
 # CONFIGURATION & SECRET_KEY VALIDATION
@@ -354,34 +370,246 @@ def update_profile():
         # Jika token tidak valid atau sudah kadaluarsa, redirect ke home
         return redirect(url_for('home'))
 
+@app.errorhandler(413)
+def handle_request_entity_too_large(e):
+    """Menangani payload upload yang melebihi batas MAX_CONTENT_LENGTH."""
+    return jsonify({
+        'result': 'fail',
+        'msg': 'Total ukuran file yang diunggah melebihi batas maksimal server (25 MB).'
+    }), 413
+
+
+def _detect_image_format(data: bytes):
+    """
+    Memeriksa magic bytes konten file gambar secara murni (tanpa dependensi eksternal).
+    Mengembalikan tuple (allowed_extensions_set, canonical_mime) atau None jika tidak valid.
+    """
+    if not data:
+        return None
+    # JPEG: FF D8 FF
+    if len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
+        return ({"jpg", "jpeg"}, "image/jpeg")
+    # PNG: 89 50 4E 47 0D 0A 1A 0A
+    if len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
+        return ({"png"}, "image/png")
+    # WebP: RIFF....WEBP
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ({"webp"}, "image/webp")
+    return None
+
+
+def validate_post_image_file(file_storage):
+    """
+    Memvalidasi satu file gambar yang diunggah untuk postingan:
+    - Nama file tidak kosong dan bebas dari komponen path traversal.
+    - Ekstensi termasuk JPG, JPEG, PNG, atau WebP.
+    - MIME type (jika dikirim) valid dan sesuai.
+    - Ukuran > 0 byte dan <= 5 MB.
+    - Konten magic bytes benar-benar gambar yang valid dan cocok dengan ekstensinya.
+    Mengembalikan (data_bytes, ext, canonical_mime, size_bytes) atau melempar ValueError.
+    """
+    if not file_storage:
+        raise ValueError("File gambar tidak ditemukan.")
+
+    raw_filename = file_storage.filename or ""
+    if not raw_filename.strip():
+        raise ValueError("Nama file gambar tidak boleh kosong.")
+
+    # Tolak upaya path traversal atau separator path mentah
+    if ".." in raw_filename or "/" in raw_filename or "\\" in raw_filename or "\x00" in raw_filename:
+        raise ValueError("Nama file tidak valid (karakter path tidak diizinkan).")
+
+    cleaned_name = secure_filename(raw_filename)
+    if not cleaned_name or "." not in cleaned_name:
+        raise ValueError("Nama file atau ekstensi tidak valid.")
+
+    ext = cleaned_name.rsplit(".", 1)[1].lower()
+    if ext not in ALLOWED_POST_IMAGE_EXTENSIONS:
+        raise ValueError("Format gambar tidak didukung. Gunakan JPG, JPEG, PNG, atau WebP.")
+
+    declared_mime = (file_storage.mimetype or "").lower().strip()
+    if declared_mime and declared_mime != "application/octet-stream":
+        if declared_mime not in ALLOWED_POST_IMAGE_MIMES:
+            raise ValueError("Tipe MIME gambar tidak didukung.")
+
+    stream = file_storage.stream
+    stream.seek(0)
+    data = stream.read(MAX_POST_IMAGE_SIZE + 1)
+    if not data or len(data) == 0:
+        raise ValueError("File gambar kosong tidak diizinkan.")
+    if len(data) > MAX_POST_IMAGE_SIZE:
+        raise ValueError("Ukuran gambar melebihi batas maksimal 5 MB per gambar.")
+
+    detected = _detect_image_format(data)
+    if not detected:
+        raise ValueError("Konten file bukan gambar JPG, PNG, atau WebP yang valid.")
+
+    valid_exts, canonical_mime = detected
+    if ext not in valid_exts:
+        raise ValueError("Konten file tidak cocok dengan ekstensi gambar yang dipilih.")
+
+    if declared_mime and declared_mime != "application/octet-stream" and declared_mime != canonical_mime:
+        raise ValueError("Tipe MIME tidak sesuai dengan konten gambar.")
+
+    return data, ext, canonical_mime, len(data)
+
+
+def save_post_image_file(data: bytes, ext: str, mime_type: str) -> dict:
+    """Menyimpan byte gambar tervalidasi ke POST_UPLOAD_DIR dengan nama unik yang aman."""
+    upload_dir = os.path.abspath(app.config["POST_UPLOAD_DIR"])
+    os.makedirs(upload_dir, exist_ok=True)
+
+    ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    filename = f"{uuid.uuid4().hex}_{ts_ms}.{ext}"
+    if not SAFE_POST_IMAGE_FILENAME_RE.match(filename):
+        raise ValueError("Gagal membuat nama file yang aman.")
+
+    target_path = os.path.abspath(os.path.join(upload_dir, filename))
+    if os.path.commonpath([upload_dir, target_path]) != upload_dir:
+        raise ValueError("Path penyimpanan tidak valid.")
+
+    with open(target_path, "wb") as f:
+        f.write(data)
+
+    return {
+        "filename": filename,
+        "url": f"/uploads/posts/{filename}",
+        "mime_type": mime_type,
+        "size": len(data),
+    }
+
+
+def safe_delete_post_image(filename: str, check_db_refs: bool = True) -> bool:
+    """
+    Menghapus file gambar post dari disk secara aman setelah memvalidasi nama file
+    dan memastikan tidak ada dokumen postingan lain yang masih mereferensikannya.
+    """
+    if not filename or not isinstance(filename, str):
+        return False
+    if not SAFE_POST_IMAGE_FILENAME_RE.match(filename):
+        return False
+
+    if check_db_refs:
+        try:
+            if db.posts.count_documents({"images.filename": filename}) > 0:
+                return False
+        except Exception:
+            return False
+
+    upload_dir = os.path.abspath(app.config["POST_UPLOAD_DIR"])
+    target_path = os.path.abspath(os.path.join(upload_dir, filename))
+    if os.path.commonpath([upload_dir, target_path]) != upload_dir:
+        return False
+
+    try:
+        if os.path.isfile(target_path):
+            os.remove(target_path)
+            return True
+    except OSError:
+        return False
+    return False
+
+
+@app.route('/uploads/posts/<path:filename>', methods=['GET'])
+def serve_post_image(filename):
+    """Menyajikan gambar postingan secara aman tanpa membuka akses ke direktori lain."""
+    if not filename or not SAFE_POST_IMAGE_FILENAME_RE.match(filename):
+        abort(404)
+
+    upload_dir = os.path.abspath(app.config["POST_UPLOAD_DIR"])
+    target_path = os.path.abspath(os.path.join(upload_dir, filename))
+    if os.path.commonpath([upload_dir, target_path]) != upload_dir:
+        abort(404)
+    if not os.path.isfile(target_path):
+        abort(404)
+
+    response = send_from_directory(upload_dir, filename)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
+
+
 @app.route('/posting', methods=['POST'])
 def posting():
     token_receive = request.cookies.get('mytoken')
+    if not token_receive:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
     try:
         payload = jwt.decode(
             token_receive,
             SECRET_KEY,
             algorithms=['HS256']
         )
-        user_info = db.users.find_one({'username': payload.get('id')})
-        comment_receive = request.form.get('comment_give')
-        date_receive = request.form.get('date_give')
+    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
+        return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
+
+    user_info = db.users.find_one({'username': payload.get('id')})
+    if not user_info:
+        return jsonify({'result': 'fail', 'msg': 'User profile not found'}), 404
+
+    comment_receive = (request.form.get('comment_give') or request.form.get('comment') or '').strip()
+    date_receive = request.form.get('date_give') or datetime.now(timezone.utc).isoformat()
+
+    raw_files = []
+    for key in ('images', 'images[]', 'file_give'):
+        raw_files.extend(request.files.getlist(key))
+
+    if len(raw_files) > MAX_POST_IMAGES_COUNT:
+        return jsonify({
+            'result': 'fail',
+            'msg': f'Maksimal {MAX_POST_IMAGES_COUNT} gambar dalam satu postingan.'
+        }), 400
+
+    if not comment_receive and len(raw_files) == 0:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Isi postingan atau minimal satu gambar wajib diisi.'
+        }), 400
+
+    if len(comment_receive) > 5000:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Panjang postingan melebihi batas maksimal 5000 karakter.'
+        }), 400
+
+    # Validasi seluruh gambar terlebih dahulu sebelum menulis file ke disk (atomik)
+    validated_payloads = []
+    for file_item in raw_files:
+        try:
+            validated_payloads.append(validate_post_image_file(file_item))
+        except ValueError as err:
+            return jsonify({'result': 'fail', 'msg': str(err)}), 400
+
+    saved_images = []
+    try:
+        for data_bytes, ext, mime_type, _size in validated_payloads:
+            saved_images.append(save_post_image_file(data_bytes, ext, mime_type))
+
         tags = extract_hashtags(comment_receive)
         doc = {
             'username': user_info.get('username'),
-            'profile_name' : user_info.get('profile_name'),
-            'profile_pic_real' : user_info.get('profile_pic_real'),
-            'comment' : comment_receive,
+            'profile_name': user_info.get('profile_name'),
+            'profile_pic_real': user_info.get('profile_pic_real'),
+            'comment': comment_receive,
             'date': date_receive,
-            'hashtags': tags
+            'hashtags': tags,
+            'images': saved_images,
         }
-        db.posts.insert_one(doc)
+        res = db.posts.insert_one(doc)
         return jsonify({
             'result': 'success',
-            'msg' : 'Posting successfull'
+            'msg': 'Posting successfull',
+            'post_id': str(res.inserted_id),
+            'images': saved_images,
         })
-    except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
-        return redirect(url_for('home'))    
+    except Exception as exc:
+        # Rollback file yang sudah ditulis jika terjadi kegagalan simpan/database
+        for img in saved_images:
+            safe_delete_post_image(img.get('filename'), check_db_refs=False)
+        return jsonify({
+            'result': 'fail',
+            'msg': f'Gagal menyimpan postingan: {exc}'
+        }), 500    
     
     
 def enrich_posts_metadata(posts, current_username):
@@ -502,6 +730,7 @@ def enrich_posts_metadata(posts, current_username):
         op['is_bookmarked'] = opid in my_bookmarks
         op['is_mine'] = (op.get('username') == current_username)
         op['is_edited'] = bool(op.get('is_edited', False))
+        op['images'] = op.get('images') if isinstance(op.get('images'), list) else []
 
     for post in posts:
         pid = str(post['_id'])
@@ -519,6 +748,7 @@ def enrich_posts_metadata(posts, current_username):
         post['is_bookmarked'] = pid in my_bookmarks
         post['is_mine'] = (post.get('username') == current_username)
         post['is_edited'] = bool(post.get('is_edited', False))
+        post['images'] = post.get('images') if isinstance(post.get('images'), list) else []
         post['hashtags'] = post.get('hashtags') if ('hashtags' in post and post.get('hashtags') is not None) else extract_hashtags(post.get('comment', ''))
 
         if post.get('original_post_id'):
@@ -1725,37 +1955,115 @@ def edit_post(post_id=None):
     if post_doc.get('username') != current_username:
         return jsonify({'result': 'fail', 'msg': 'You do not have permission to edit this post'}), 403
 
-    # Validasi konten baru
+    # Validasi konten & gambar baru
     new_content = None
+    json_body = None
     if request.is_json:
-        new_content = (request.get_json(silent=True) or {}).get('comment')
-    if not new_content:
-        new_content = request.form.get('comment_give') or request.form.get('comment')
+        json_body = request.get_json(silent=True) or {}
+        new_content = json_body.get('comment')
+    if new_content is None:
+        new_content = request.form.get('comment_give')
+        if new_content is None:
+            new_content = request.form.get('comment')
 
-    if not new_content or not isinstance(new_content, str) or not new_content.strip():
-        return jsonify({'result': 'fail', 'msg': 'Post content cannot be empty'}), 400
-
+    if new_content is None:
+        new_content = ''
+    if not isinstance(new_content, str):
+        return jsonify({'result': 'fail', 'msg': 'Invalid post content'}), 400
     new_content = new_content.strip()
+
     if len(new_content) > 5000:
         return jsonify({'result': 'fail', 'msg': 'Post content exceeds maximum length'}), 400
 
-    tags = extract_hashtags(new_content)
-    now = datetime.now(timezone.utc).isoformat()
-    db.posts.update_one(
-        {'_id': ObjectId(target_pid)},
-        {'$set': {
-            'comment': new_content,
-            'hashtags': tags,
-            'is_edited': True,
-            'updated_at': now
-        }}
+    existing_images = post_doc.get('images') if isinstance(post_doc.get('images'), list) else []
+
+    # Cek apakah request menyertakan pengelolaan gambar (keep_images atau file baru)
+    new_files = []
+    for key in ('images', 'images[]', 'file_give'):
+        new_files.extend(request.files.getlist(key))
+
+    has_keep_param = (
+        (json_body is not None and 'keep_images' in json_body)
+        or ('keep_images' in request.form)
     )
+
+    if has_keep_param or new_files:
+        if json_body is not None and 'keep_images' in json_body:
+            raw_keep = json_body.get('keep_images') or []
+            keep_filenames = set(raw_keep if isinstance(raw_keep, list) else [])
+        elif 'keep_images' in request.form:
+            keep_list = request.form.getlist('keep_images')
+            if len(keep_list) == 1 and keep_list[0].strip().startswith('['):
+                import json as _json
+                try:
+                    parsed_keep = _json.loads(keep_list[0])
+                    keep_filenames = set(parsed_keep if isinstance(parsed_keep, list) else [])
+                except Exception:
+                    return jsonify({'result': 'fail', 'msg': 'Invalid keep_images format'}), 400
+            else:
+                keep_filenames = set(x.strip() for x in keep_list if x.strip())
+        else:
+            keep_filenames = {img.get('filename') for img in existing_images if img.get('filename')}
+
+        kept_images = [img for img in existing_images if img.get('filename') in keep_filenames]
+        removed_filenames = [
+            img.get('filename') for img in existing_images
+            if img.get('filename') and img.get('filename') not in keep_filenames
+        ]
+    else:
+        kept_images = list(existing_images)
+        removed_filenames = []
+
+    if len(kept_images) + len(new_files) > MAX_POST_IMAGES_COUNT:
+        return jsonify({
+            'result': 'fail',
+            'msg': f'Maksimal {MAX_POST_IMAGES_COUNT} gambar dalam satu postingan.'
+        }), 400
+
+    if not new_content and (len(kept_images) + len(new_files)) == 0:
+        return jsonify({'result': 'fail', 'msg': 'Post content cannot be empty'}), 400
+
+    validated_new = []
+    for file_item in new_files:
+        try:
+            validated_new.append(validate_post_image_file(file_item))
+        except ValueError as err:
+            return jsonify({'result': 'fail', 'msg': str(err)}), 400
+
+    saved_new_images = []
+    try:
+        for data_bytes, ext, mime_type, _size in validated_new:
+            saved_new_images.append(save_post_image_file(data_bytes, ext, mime_type))
+
+        final_images = kept_images + saved_new_images
+        tags = extract_hashtags(new_content)
+        now = datetime.now(timezone.utc).isoformat()
+        db.posts.update_one(
+            {'_id': ObjectId(target_pid)},
+            {'$set': {
+                'comment': new_content,
+                'hashtags': tags,
+                'images': final_images,
+                'is_edited': True,
+                'updated_at': now
+            }}
+        )
+    except Exception as exc:
+        # Rollback gambar baru jika update DB gagal, dan biarkan gambar lama tetap aman
+        for img in saved_new_images:
+            safe_delete_post_image(img.get('filename'), check_db_refs=False)
+        return jsonify({'result': 'fail', 'msg': f'Failed to update post: {exc}'}), 500
+
+    # Hapus gambar lama yang sudah tidak dipakai hanya setelah update berhasil disimpan
+    for old_fname in removed_filenames:
+        safe_delete_post_image(old_fname, check_db_refs=True)
 
     return jsonify({
         'result': 'success',
         'msg': 'Post updated successfully',
         'post_id': target_pid,
         'comment': new_content,
+        'images': final_images,
         'is_edited': True
     }), 200
 
@@ -1765,7 +2073,7 @@ def edit_post(post_id=None):
 def delete_post_endpoint(post_id=None):
     """
     Endpoint penghapusan postingan milik pengguna sendiri.
-    Menghapus dokumen post dan membersihkan data referensi terkait (bookmarks, reactions, comments).
+    Menghapus dokumen post dan membersihkan data referensi terkait (bookmarks, reactions, comments, images).
     """
     token_receive = request.cookies.get('mytoken')
     if not token_receive:
@@ -1804,11 +2112,65 @@ def delete_post_endpoint(post_id=None):
     db.posts.delete_many({'original_post_id': target_pid, 'post_type': 'repost'})
     cleanup_notifications_for_post(target_pid)
 
+    # Hapus file gambar milik post ini jika bukan repost dan tidak direferensikan post lain
+    if post_doc.get('post_type') != 'repost':
+        for img in (post_doc.get('images') or []):
+            if isinstance(img, dict) and img.get('filename'):
+                safe_delete_post_image(img['filename'], check_db_refs=True)
+
     return jsonify({
         'result': 'success',
         'msg': 'Post deleted successfully',
         'post_id': target_pid
-    }), 200  
+    }), 200
+
+
+@app.route('/api/posts/<post_id>', methods=['GET'])
+def get_single_post_api(post_id):
+    """Mengambil detail satu postingan beserta metadata lengkap (JSON)."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    if not post_id or not ObjectId.is_valid(post_id):
+        return jsonify({'result': 'fail', 'msg': 'Invalid post ID format'}), 400
+
+    post_doc = db.posts.find_one({'_id': ObjectId(post_id)})
+    if not post_doc:
+        return jsonify({'result': 'fail', 'msg': 'Post not found'}), 404
+
+    enriched = enrich_posts_metadata([post_doc], payload.get('id'))
+    return jsonify({
+        'result': 'success',
+        'post': enriched[0]
+    }), 200
+
+
+@app.route('/post/<post_id>', methods=['GET'])
+def post_detail_page(post_id):
+    """Halaman detail satu postingan (mendukung rich media, komentar, dan lightbox)."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return redirect(url_for('login'))
+
+    current_username = payload.get('id')
+    user_info = db.users.find_one({'username': current_username}, {'_id': False})
+    if not user_info:
+        return redirect(url_for('login'))
+
+    if not post_id or not ObjectId.is_valid(post_id):
+        return render_template('404.html', username=post_id, current_user=user_info), 404
+
+    post_doc = db.posts.find_one({'_id': ObjectId(post_id)})
+    if not post_doc:
+        return render_template('404.html', username=post_id, current_user=user_info), 404
+
+    return render_template(
+        'post_detail.html',
+        user_info=user_info,
+        current_user=user_info,
+        post_id=post_id,
+    )
 
 
 @app.route('/api/posts/<post_id>/repost', methods=['POST'])

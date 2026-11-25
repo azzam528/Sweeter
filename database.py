@@ -81,6 +81,8 @@ def init_indexes():
         db.posts.create_index([("hashtags", 1)])
         # 22. Compound index pada (hashtags, date) untuk feed topik kronologis
         db.posts.create_index([("hashtags", 1), ("date", -1)])
+        # 23. Index pada images.filename untuk pengecekan referensi file sebelum penghapusan aman
+        db.posts.create_index([("images.filename", 1)])
     except Exception as e:
         print(f"Warning saat inisialisasi index MongoDB: {e}")
 
