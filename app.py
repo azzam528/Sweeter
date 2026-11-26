@@ -1,9 +1,13 @@
 import os
 import re
 import uuid
+import json
+import time
+import threading
 import hashlib
 import jwt
 import warnings
+from collections import defaultdict, deque
 
 from datetime import datetime, timedelta, timezone
 from bson import ObjectId
@@ -493,6 +497,8 @@ def safe_delete_post_image(filename: str, check_db_refs: bool = True) -> bool:
         try:
             if db.posts.count_documents({"images.filename": filename}) > 0:
                 return False
+            if db.drafts.count_documents({"images.filename": filename}) > 0:
+                return False
         except Exception:
             return False
 
@@ -527,6 +533,40 @@ def serve_post_image(filename):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Cache-Control"] = "public, max-age=86400"
     return response
+
+
+def _create_published_post(user_info: dict, comment_text: str, date_str: str = None, images_list: list = None) -> dict:
+    """
+    Helper terpusat untuk memvalidasi dan membuat dokumen postingan publik baru di db.posts.
+    Digunakan bersama oleh POST /posting dan POST /api/drafts/<draft_id>/publish agar tidak
+    ada duplikasi logika pembuatan postingan.
+    """
+    comment_clean = (comment_text or '').strip() if isinstance(comment_text, str) else ''
+    images_clean = list(images_list) if isinstance(images_list, list) else []
+
+    if not comment_clean and len(images_clean) == 0:
+        raise ValueError('Isi postingan atau minimal satu gambar wajib diisi.')
+
+    if len(comment_clean) > 5000:
+        raise ValueError('Panjang postingan melebihi batas maksimal 5000 karakter.')
+
+    if len(images_clean) > MAX_POST_IMAGES_COUNT:
+        raise ValueError(f'Maksimal {MAX_POST_IMAGES_COUNT} gambar dalam satu postingan.')
+
+    final_date = date_str or datetime.now(timezone.utc).isoformat()
+    tags = extract_hashtags(comment_clean)
+    doc = {
+        'username': user_info.get('username'),
+        'profile_name': user_info.get('profile_name'),
+        'profile_pic_real': user_info.get('profile_pic_real'),
+        'comment': comment_clean,
+        'date': final_date,
+        'hashtags': tags,
+        'images': images_clean,
+    }
+    res = db.posts.insert_one(doc)
+    doc['_id'] = str(res.inserted_id)
+    return doc
 
 
 @app.route('/posting', methods=['POST'])
@@ -585,23 +625,22 @@ def posting():
         for data_bytes, ext, mime_type, _size in validated_payloads:
             saved_images.append(save_post_image_file(data_bytes, ext, mime_type))
 
-        tags = extract_hashtags(comment_receive)
-        doc = {
-            'username': user_info.get('username'),
-            'profile_name': user_info.get('profile_name'),
-            'profile_pic_real': user_info.get('profile_pic_real'),
-            'comment': comment_receive,
-            'date': date_receive,
-            'hashtags': tags,
-            'images': saved_images,
-        }
-        res = db.posts.insert_one(doc)
+        created_doc = _create_published_post(
+            user_info=user_info,
+            comment_text=comment_receive,
+            date_str=date_receive,
+            images_list=saved_images,
+        )
         return jsonify({
             'result': 'success',
             'msg': 'Posting successfull',
-            'post_id': str(res.inserted_id),
+            'post_id': created_doc['_id'],
             'images': saved_images,
         })
+    except ValueError as verr:
+        for img in saved_images:
+            safe_delete_post_image(img.get('filename'), check_db_refs=False)
+        return jsonify({'result': 'fail', 'msg': str(verr)}), 400
     except Exception as exc:
         # Rollback file yang sudah ditulis jika terjadi kegagalan simpan/database
         for img in saved_images:
@@ -2791,6 +2830,587 @@ def search_api():
         results['posts'] = enrich_posts_metadata(post_matches, current_username)
 
     return jsonify(results), 200  
+
+
+# ==========================================
+# DRAFT POSTS & AUTOSAVE SUBSYSTEM
+# ==========================================
+
+DRAFT_RATE_LIMIT_MAX = int(os.getenv("DRAFT_RATE_LIMIT_MAX", "60"))
+DRAFT_RATE_LIMIT_WINDOW = int(os.getenv("DRAFT_RATE_LIMIT_WINDOW", "60"))
+_draft_rate_buckets = defaultdict(deque)
+_draft_rate_lock = threading.Lock()
+
+
+def _check_draft_rate_limit(username: str) -> bool:
+    """Sliding-window per-user rate limiter untuk melindungi endpoint draft/autosave dari penyalahgunaan."""
+    if app.config.get("DISABLE_DRAFT_RATE_LIMIT"):
+        return True
+    now_ts = time.monotonic()
+    cutoff = now_ts - DRAFT_RATE_LIMIT_WINDOW
+    with _draft_rate_lock:
+        bucket = _draft_rate_buckets[username]
+        while bucket and bucket[0] < cutoff:
+            bucket.popleft()
+        if len(bucket) >= DRAFT_RATE_LIMIT_MAX:
+            return False
+        bucket.append(now_ts)
+    return True
+
+
+def _serialize_draft(doc: dict) -> dict:
+    """Mengubah dokumen MongoDB draft menjadi dictionary siap-JSON yang aman."""
+    if not doc:
+        return None
+    return {
+        '_id': str(doc['_id']),
+        'user_id': doc.get('user_id', ''),
+        'content': doc.get('content', ''),
+        'images': doc.get('images') if isinstance(doc.get('images'), list) else [],
+        'version': int(doc.get('version', 1)),
+        'client_draft_key': doc.get('client_draft_key'),
+        'created_at': doc.get('created_at', ''),
+        'updated_at': doc.get('updated_at', ''),
+        'last_saved_at': doc.get('last_saved_at', doc.get('updated_at', '')),
+    }
+
+
+def _parse_draft_request_payload(existing_images=None):
+    """
+    Mengekstrak dan memvalidasi payload draft dari JSON atau multipart/form-data.
+    Mengembalikan dict berisi: content, kept_images, removed_filenames, new_files,
+    version, client_seq, client_draft_key, atau melempar ValueError.
+    """
+    json_body = request.get_json(silent=True) if request.is_json else None
+
+    if json_body is not None:
+        raw_content = json_body.get('content')
+        if raw_content is None:
+            raw_content = json_body.get('comment')
+        raw_version = json_body.get('version')
+        raw_seq = json_body.get('client_seq')
+        raw_key = json_body.get('client_draft_key')
+        has_keep_param = ('keep_images' in json_body)
+        raw_keep = json_body.get('keep_images')
+    else:
+        raw_content = request.form.get('content')
+        if raw_content is None:
+            raw_content = request.form.get('comment_give') or request.form.get('comment')
+        raw_version = request.form.get('version')
+        raw_seq = request.form.get('client_seq')
+        raw_key = request.form.get('client_draft_key')
+        has_keep_param = ('keep_images' in request.form)
+        raw_keep = request.form.getlist('keep_images') if has_keep_param else None
+
+    if raw_content is None:
+        content = ''
+    elif isinstance(raw_content, str):
+        content = raw_content.strip()
+    else:
+        raise ValueError('Format konten draft tidak valid.')
+
+    if len(content) > 5000:
+        raise ValueError('Panjang konten draft melebihi batas maksimal 5000 karakter.')
+
+    # Parse version & client_seq opsional untuk kontrol konkurensi
+    version = None
+    if raw_version not in (None, ''):
+        try:
+            version = int(raw_version)
+            if version < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError('Parameter version tidak valid.')
+
+    client_seq = None
+    if raw_seq not in (None, ''):
+        try:
+            client_seq = int(raw_seq)
+            if client_seq < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError('Parameter client_seq tidak valid.')
+
+    client_draft_key = None
+    if isinstance(raw_key, str) and raw_key.strip():
+        clean_key = raw_key.strip()
+        if len(clean_key) > 100 or not re.match(r'^[a-zA-Z0-9_-]+$', clean_key):
+            raise ValueError('Parameter client_draft_key tidak valid.')
+        client_draft_key = clean_key
+
+    # Kelola gambar yang dipertahankan vs gambar baru
+    base_images = list(existing_images) if isinstance(existing_images, list) else []
+    new_files = []
+    for key in ('images', 'images[]', 'file_give'):
+        new_files.extend(request.files.getlist(key))
+
+    if has_keep_param:
+        if isinstance(raw_keep, list):
+            if len(raw_keep) == 1 and isinstance(raw_keep[0], str) and raw_keep[0].strip().startswith('['):
+                try:
+                    parsed = json.loads(raw_keep[0])
+                    keep_filenames = {str(x).strip() for x in (parsed if isinstance(parsed, list) else []) if str(x).strip()}
+                except Exception:
+                    raise ValueError('Format keep_images tidak valid.')
+            else:
+                keep_filenames = {str(x).strip() for x in raw_keep if str(x).strip()}
+        elif isinstance(raw_keep, str) and raw_keep.strip().startswith('['):
+            try:
+                parsed = json.loads(raw_keep)
+                keep_filenames = {str(x).strip() for x in (parsed if isinstance(parsed, list) else []) if str(x).strip()}
+            except Exception:
+                raise ValueError('Format keep_images tidak valid.')
+        else:
+            keep_filenames = set()
+
+        kept_images = [img for img in base_images if img.get('filename') in keep_filenames]
+        removed_filenames = [
+            img.get('filename') for img in base_images
+            if img.get('filename') and img.get('filename') not in keep_filenames
+        ]
+    else:
+        kept_images = list(base_images)
+        removed_filenames = []
+
+    if len(kept_images) + len(new_files) > MAX_POST_IMAGES_COUNT:
+        raise ValueError(f'Maksimal {MAX_POST_IMAGES_COUNT} gambar dalam satu draft.')
+
+    return {
+        'content': content,
+        'kept_images': kept_images,
+        'removed_filenames': removed_filenames,
+        'new_files': new_files,
+        'version': version,
+        'client_seq': client_seq,
+        'client_draft_key': client_draft_key,
+    }
+
+
+def _get_owned_draft_or_error(draft_id: str, current_username: str):
+    """Memvalidasi format draft_id, keberadaan dokumen, dan kepemilikan oleh current_username."""
+    if not draft_id or not ObjectId.is_valid(draft_id):
+        return None, (jsonify({'result': 'fail', 'msg': 'Invalid draft ID format'}), 400)
+
+    draft_doc = db.drafts.find_one({'_id': ObjectId(draft_id)})
+    if not draft_doc:
+        return None, (jsonify({'result': 'fail', 'msg': 'Draft not found'}), 404)
+
+    if draft_doc.get('user_id') != current_username:
+        return None, (jsonify({'result': 'fail', 'msg': 'You do not have permission to access this draft'}), 403)
+
+    return draft_doc, None
+
+
+@app.route('/drafts', methods=['GET'])
+def drafts_page():
+    """Halaman khusus manajemen draft postingan milik pengguna yang terautentikasi."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return redirect(url_for('login'))
+
+    current_username = payload.get('id')
+    user_info = db.users.find_one({'username': current_username}, {'_id': False})
+    if not user_info:
+        return redirect(url_for('login'))
+
+    draft_count = db.drafts.count_documents({'user_id': current_username})
+    return render_template(
+        'drafts.html',
+        user_info=user_info,
+        current_user=user_info,
+        draft_count=draft_count,
+    )
+
+
+@app.route('/api/drafts/count', methods=['GET'])
+def get_drafts_count_api():
+    """Mengembalikan jumlah draft tersimpan milik pengguna aktif."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    count = db.drafts.count_documents({'user_id': payload.get('id')})
+    return jsonify({'result': 'success', 'draft_count': count}), 200
+
+
+@app.route('/api/drafts', methods=['GET'])
+def list_drafts_api():
+    """Mengambil daftar draft milik pengguna aktif, diurutkan dari pembaruan terbaru, dengan cursor pagination."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    cursor = request.args.get('cursor', '').strip()
+    limit_raw = request.args.get('limit', '20').strip()
+    try:
+        limit = max(1, min(int(limit_raw), 50))
+    except ValueError:
+        return jsonify({'result': 'fail', 'msg': 'Invalid limit parameter'}), 400
+
+    query = {'user_id': current_username}
+    total_count = db.drafts.count_documents({'user_id': current_username})
+
+    if cursor:
+        if not ObjectId.is_valid(cursor):
+            return jsonify({'result': 'fail', 'msg': 'Invalid cursor parameter'}), 400
+        anchor = db.drafts.find_one({'_id': ObjectId(cursor), 'user_id': current_username})
+        if not anchor:
+            return jsonify({'result': 'fail', 'msg': 'Cursor not found'}), 404
+        anchor_ts = anchor.get('updated_at', '')
+        query = {
+            '$and': [
+                {'user_id': current_username},
+                {'$or': [
+                    {'updated_at': {'$lt': anchor_ts}},
+                    {'updated_at': anchor_ts, '_id': {'$lt': anchor['_id']}}
+                ]}
+            ]
+        }
+
+    docs = list(db.drafts.find(query).sort([('updated_at', -1), ('_id', -1)]).limit(limit))
+    drafts = [_serialize_draft(d) for d in docs]
+    has_more = (len(docs) == limit)
+    next_cursor = str(docs[-1]['_id']) if has_more else None
+
+    return jsonify({
+        'result': 'success',
+        'drafts': drafts,
+        'total_count': total_count,
+        'has_more': has_more,
+        'next_cursor': next_cursor,
+    }), 200
+
+
+@app.route('/api/drafts', methods=['POST'])
+def create_draft_api():
+    """
+    Membuat draft baru (manual save maupun autosave awal).
+    Menggunakan client_draft_key opsional untuk mencegah duplikasi dari request bersamaan/klik ganda.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    if not _check_draft_rate_limit(current_username):
+        return jsonify({'result': 'fail', 'msg': 'Terlalu banyak permintaan penyimpanan draft. Coba sesaat lagi.'}), 429
+
+    try:
+        parsed = _parse_draft_request_payload(existing_images=None)
+    except ValueError as err:
+        return jsonify({'result': 'fail', 'msg': str(err)}), 400
+
+    content = parsed['content']
+    new_files = parsed['new_files']
+    client_key = parsed['client_draft_key']
+
+    if not content and len(new_files) == 0:
+        return jsonify({'result': 'fail', 'msg': 'Konten draft atau minimal satu gambar wajib diisi.'}), 400
+
+    # Validasi seluruh gambar sebelum menulis ke disk
+    validated_new = []
+    for f in new_files:
+        try:
+            validated_new.append(validate_post_image_file(f))
+        except ValueError as err:
+            return jsonify({'result': 'fail', 'msg': str(err)}), 400
+
+    # Idempotency check jika client_draft_key sudah ada untuk user ini
+    if client_key:
+        existing_by_key = db.drafts.find_one({'user_id': current_username, 'client_draft_key': client_key})
+        if existing_by_key:
+            return _perform_draft_update(existing_by_key, parsed, validated_new, status_code=200)
+
+    saved_images = []
+    try:
+        for data_bytes, ext, mime_type, _size in validated_new:
+            saved_images.append(save_post_image_file(data_bytes, ext, mime_type))
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        doc = {
+            'user_id': current_username,
+            'content': content,
+            'images': saved_images,
+            'version': 1,
+            'last_client_seq': parsed['client_seq'] or 0,
+            'created_at': now_iso,
+            'updated_at': now_iso,
+            'last_saved_at': now_iso,
+        }
+        if client_key:
+            doc['client_draft_key'] = client_key
+
+        try:
+            res = db.drafts.insert_one(doc)
+        except DuplicateKeyError:
+            # Jika race condition menyisipkan key yang sama bersamaan, rollback file baru dan update dokumen yang ada
+            for img in saved_images:
+                safe_delete_post_image(img.get('filename'), check_db_refs=False)
+            saved_images = []
+            existing_by_key = db.drafts.find_one({'user_id': current_username, 'client_draft_key': client_key})
+            if existing_by_key:
+                return _perform_draft_update(existing_by_key, parsed, validated_new, status_code=200)
+            raise
+
+        doc['_id'] = res.inserted_id
+        return jsonify({
+            'result': 'success',
+            'msg': 'Draft berhasil disimpan.',
+            'draft': _serialize_draft(doc),
+        }), 201
+    except Exception as exc:
+        for img in saved_images:
+            safe_delete_post_image(img.get('filename'), check_db_refs=False)
+        return jsonify({'result': 'fail', 'msg': f'Gagal menyimpan draft: {exc}'}), 500
+
+
+def _perform_draft_update(draft_doc: dict, parsed: dict, validated_new: list, status_code: int = 200):
+    """Helper internal pembaruan draft dengan proteksi version/sequence dan rollback aman."""
+    draft_id = str(draft_doc['_id'])
+    current_version = int(draft_doc.get('version', 1))
+    last_seq = int(draft_doc.get('last_client_seq', 0))
+
+    req_version = parsed.get('version')
+    if req_version is not None and req_version < current_version:
+        return jsonify({
+            'result': 'fail',
+            'code': 'STALE_VERSION',
+            'msg': 'Versi draft lebih lama diabaikan agar tidak menimpa perubahan terbaru.',
+            'current_version': current_version,
+        }), 409
+
+    req_seq = parsed.get('client_seq')
+    if req_seq is not None and req_seq < last_seq:
+        return jsonify({
+            'result': 'fail',
+            'code': 'STALE_SEQUENCE',
+            'msg': 'Request autosave kadaluarsa diabaikan.',
+            'current_version': current_version,
+        }), 409
+
+    content = parsed['content']
+    kept_images = parsed['kept_images']
+    removed_filenames = parsed['removed_filenames']
+
+    if not content and (len(kept_images) + len(validated_new)) == 0:
+        return jsonify({'result': 'fail', 'msg': 'Konten draft atau minimal satu gambar wajib diisi.'}), 400
+
+    saved_new_images = []
+    try:
+        for data_bytes, ext, mime_type, _size in validated_new:
+            saved_new_images.append(save_post_image_file(data_bytes, ext, mime_type))
+
+        final_images = kept_images + saved_new_images
+        now_iso = datetime.now(timezone.utc).isoformat()
+        new_version = current_version + 1
+        new_seq = req_seq if req_seq is not None else last_seq
+
+        db.drafts.update_one(
+            {'_id': draft_doc['_id']},
+            {'$set': {
+                'content': content,
+                'images': final_images,
+                'version': new_version,
+                'last_client_seq': new_seq,
+                'updated_at': now_iso,
+                'last_saved_at': now_iso,
+            }}
+        )
+    except Exception as exc:
+        for img in saved_new_images:
+            safe_delete_post_image(img.get('filename'), check_db_refs=False)
+        return jsonify({'result': 'fail', 'msg': f'Gagal memperbarui draft: {exc}'}), 500
+
+    for old_fname in removed_filenames:
+        safe_delete_post_image(old_fname, check_db_refs=True)
+
+    updated_doc = db.drafts.find_one({'_id': draft_doc['_id']}) or {
+        **draft_doc,
+        'content': content,
+        'images': final_images,
+        'version': new_version,
+        'updated_at': now_iso,
+        'last_saved_at': now_iso,
+    }
+    return jsonify({
+        'result': 'success',
+        'msg': 'Draft diperbarui.',
+        'draft': _serialize_draft(updated_doc),
+    }), status_code
+
+
+@app.route('/api/drafts/<draft_id>', methods=['GET'])
+def get_single_draft_api(draft_id):
+    """Mengambil satu dokumen draft milik pengguna aktif."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    draft_doc, err_resp = _get_owned_draft_or_error(draft_id, payload.get('id'))
+    if err_resp:
+        return err_resp
+
+    return jsonify({
+        'result': 'success',
+        'draft': _serialize_draft(draft_doc),
+    }), 200
+
+
+@app.route('/api/drafts/<draft_id>', methods=['PUT', 'POST'])
+def update_draft_api(draft_id):
+    """Memperbarui draft yang sudah ada (digunakan oleh autosave dan manual save)."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    if not _check_draft_rate_limit(current_username):
+        return jsonify({'result': 'fail', 'msg': 'Terlalu banyak permintaan penyimpanan draft. Coba sesaat lagi.'}), 429
+
+    draft_doc, err_resp = _get_owned_draft_or_error(draft_id, current_username)
+    if err_resp:
+        return err_resp
+
+    existing_images = draft_doc.get('images') if isinstance(draft_doc.get('images'), list) else []
+    try:
+        parsed = _parse_draft_request_payload(existing_images=existing_images)
+    except ValueError as err:
+        return jsonify({'result': 'fail', 'msg': str(err)}), 400
+
+    validated_new = []
+    for f in parsed['new_files']:
+        try:
+            validated_new.append(validate_post_image_file(f))
+        except ValueError as err:
+            return jsonify({'result': 'fail', 'msg': str(err)}), 400
+
+    return _perform_draft_update(draft_doc, parsed, validated_new, status_code=200)
+
+
+@app.route('/api/drafts/<draft_id>', methods=['DELETE'])
+@app.route('/api/drafts/<draft_id>/delete', methods=['POST'])
+def delete_draft_api(draft_id):
+    """Menghapus draft milik pengguna aktif dan membersihkan file gambar yang tidak lagi direferensikan."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    draft_doc, err_resp = _get_owned_draft_or_error(draft_id, current_username)
+    if err_resp:
+        return err_resp
+
+    db.drafts.delete_one({'_id': ObjectId(draft_id)})
+
+    for img in (draft_doc.get('images') or []):
+        if isinstance(img, dict) and img.get('filename'):
+            safe_delete_post_image(img['filename'], check_db_refs=True)
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Draft berhasil dihapus.',
+        'draft_id': draft_id,
+    }), 200
+
+
+@app.route('/api/drafts/<draft_id>/publish', methods=['POST'])
+def publish_draft_api(draft_id):
+    """
+    Memublikasikan draft menjadi postingan publik:
+    1. Memvalidasi kepemilikan draft & mengunci secara atomik (is_publishing) agar klik ganda tidak membuat duplikat.
+    2. Menggunakan kembali _create_published_post() tanpa menduplikasi logika pembuatan postingan.
+    3. Menghapus draft HANYA setelah postingan publik berhasil disimpan; gagal -> draft tetap utuh.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    draft_doc, err_resp = _get_owned_draft_or_error(draft_id, current_username)
+    if err_resp:
+        return err_resp
+
+    user_info = db.users.find_one({'username': current_username})
+    if not user_info:
+        return jsonify({'result': 'fail', 'msg': 'User profile not found'}), 404
+
+    # Kunci draft secara atomik untuk mencegah duplikasi publikasi dari request paralel/berulang
+    lock_res = db.drafts.update_one(
+        {'_id': ObjectId(draft_id), 'user_id': current_username, 'is_publishing': {'$ne': True}},
+        {'$set': {'is_publishing': True}}
+    )
+    if getattr(lock_res, 'modified_count', 0) == 0:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Draft sedang dipublikasikan atau sudah dipublikasikan.'
+        }), 409
+
+    saved_new_images = []
+    try:
+        # Jika request publish membawa pembaruan terakhir dari editor (JSON/multipart), gunakan; jika kosong pakai draft tersimpan
+        has_inline_payload = bool(
+            request.is_json
+            or request.form
+            or request.files
+        )
+        existing_images = draft_doc.get('images') if isinstance(draft_doc.get('images'), list) else []
+
+        if has_inline_payload:
+            parsed = _parse_draft_request_payload(existing_images=existing_images)
+            final_content = parsed['content']
+            kept_images = parsed['kept_images']
+            removed_filenames = parsed['removed_filenames']
+
+            validated_new = []
+            for f in parsed['new_files']:
+                validated_new.append(validate_post_image_file(f))
+
+            for data_bytes, ext, mime_type, _size in validated_new:
+                saved_new_images.append(save_post_image_file(data_bytes, ext, mime_type))
+
+            final_images = kept_images + saved_new_images
+        else:
+            final_content = (draft_doc.get('content') or '').strip()
+            final_images = list(existing_images)
+            removed_filenames = []
+
+        date_str = request.form.get('date_give') if request.form else None
+        if not date_str and request.is_json:
+            date_str = (request.get_json(silent=True) or {}).get('date_give')
+
+        created_post = _create_published_post(
+            user_info=user_info,
+            comment_text=final_content,
+            date_str=date_str,
+            images_list=final_images,
+        )
+    except ValueError as err:
+        # Validasi gagal -> batalkan file baru, buka kunci draft agar tetap utuh
+        for img in saved_new_images:
+            safe_delete_post_image(img.get('filename'), check_db_refs=False)
+        db.drafts.update_one({'_id': ObjectId(draft_id)}, {'$set': {'is_publishing': False}})
+        return jsonify({'result': 'fail', 'msg': str(err)}), 400
+    except Exception as exc:
+        for img in saved_new_images:
+            safe_delete_post_image(img.get('filename'), check_db_refs=False)
+        db.drafts.update_one({'_id': ObjectId(draft_id)}, {'$set': {'is_publishing': False}})
+        return jsonify({'result': 'fail', 'msg': f'Gagal memublikasikan draft: {exc}'}), 500
+
+    # Hanya hapus draft setelah postingan publik berhasil tersimpan
+    db.drafts.delete_one({'_id': ObjectId(draft_id)})
+
+    # Bersihkan file draft yang dibuang saat publish (jika ada)
+    for old_fname in removed_filenames:
+        safe_delete_post_image(old_fname, check_db_refs=True)
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Draft berhasil dipublikasikan.',
+        'post_id': created_post['_id'],
+        'post': created_post,
+        'draft_id': draft_id,
+    }), 201
 
 
 if __name__ == "__main__":

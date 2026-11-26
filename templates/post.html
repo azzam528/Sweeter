@@ -108,6 +108,10 @@
     <nav class="hidden lg:flex items-center gap-space-md">
       <a aria-current="page" class="px-space-md py-space-xs transition-colors bg-secondary-container text-on-secondary-container font-semibold rounded-full" href="/">Timeline</a>
       <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full no-underline" href="/explore">Explore</a>
+      <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full no-underline flex items-center gap-1.5" href="/drafts">
+        <span>Drafts</span>
+        <span id="header-drafts-badge" class="hidden bg-secondary-container text-on-secondary-container text-[10px] font-bold px-1.5 py-0.2 rounded-full"></span>
+      </a>
       <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full no-underline" href="/bookmarks">Bookmarks</a>
       <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full no-underline flex items-center gap-1.5" href="/notifications">
         <span>Notifications</span>
@@ -152,6 +156,13 @@
         <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/user/{{ user_info.username | e }}">
           <span class="material-symbols-outlined text-[22px]">person</span>
           <span class="font-label-md text-label-md">Profile</span>
+        </a>
+        <a class="flex items-center justify-between px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/drafts">
+          <div class="flex items-center gap-space-md">
+            <span class="material-symbols-outlined text-[22px]">drafts</span>
+            <span class="font-label-md text-label-md">Drafts</span>
+          </div>
+          <span id="nav-drafts-badge" class="hidden bg-secondary-container text-on-secondary-container text-caption font-bold px-2 py-0.5 rounded-full text-[11px] leading-tight"></span>
         </a>
         <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/bookmarks">
           <span class="material-symbols-outlined text-[22px]">bookmark</span>
@@ -217,7 +228,18 @@
         </section>
 
         <!-- ===== POST COMPOSER CARD ===== -->
-        <section id="post-composer" class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm mb-space-md">
+        <section id="post-composer" class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm mb-space-md" data-username="{{ user_info.username | e }}">
+          <!-- Editing Draft Banner (shown when resuming an existing draft) -->
+          <div id="editing-draft-banner" class="hidden mb-space-sm px-space-sm py-1.5 rounded-lg bg-secondary-container/70 text-on-secondary-container font-label-sm text-label-sm flex items-center justify-between gap-2">
+            <div class="flex items-center gap-1.5">
+              <span class="material-symbols-outlined text-[16px] text-primary">drafts</span>
+              <span>Sedang mengedit draft tersimpan</span>
+            </div>
+            <button type="button" id="cancel-draft-edit-btn" onclick="reset_composer_draft_mode()" class="font-caption text-caption text-primary font-semibold hover:underline border-0 bg-transparent cursor-pointer p-0">
+              Buat Post Baru
+            </button>
+          </div>
+
           <div class="flex items-start gap-space-sm">
             <img alt="Your avatar"
                  class="w-10 h-10 rounded-full object-cover shrink-0"
@@ -260,7 +282,7 @@
                      class="hidden" />
 
               <div class="flex items-center justify-between mt-space-sm pt-space-xs gap-2 flex-wrap">
-                <div class="flex items-center gap-space-xs text-on-surface-variant">
+                <div class="flex items-center gap-space-xs text-on-surface-variant flex-wrap">
                   <button type="button"
                           id="post-image-btn"
                           onclick="$('#post-image-input').click()"
@@ -269,13 +291,22 @@
                     <span class="material-symbols-outlined text-[20px]">image</span>
                     <span class="font-label-sm text-label-sm">Foto</span>
                   </button>
-                  <span class="font-caption text-caption text-outline hidden sm:inline">Maks. 4 gambar (JPG/PNG/WebP · 5 MB)</span>
+                  <span id="draft-autosave-status" class="font-caption text-caption text-on-surface-variant flex items-center gap-1 ml-1" aria-live="polite"></span>
                 </div>
-                <button id="post-submit-btn"
-                        type="button"
-                        class="px-space-md py-space-xs bg-primary-container text-on-primary font-label-md text-label-md rounded-full hover:bg-primary shadow-sm active:scale-95 transition-all border-0 cursor-pointer flex items-center gap-1.5">
-                  <span>Post</span>
-                </button>
+                <div class="flex items-center gap-space-xs">
+                  <button id="post-save-draft-btn"
+                          type="button"
+                          onclick="save_draft_manual()"
+                          class="px-space-md py-space-xs bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm text-label-sm rounded-full transition-all border border-outline-variant/50 cursor-pointer flex items-center gap-1">
+                    <span class="material-symbols-outlined text-[16px]">save</span>
+                    <span>Simpan Draft</span>
+                  </button>
+                  <button id="post-submit-btn"
+                          type="button"
+                          class="px-space-md py-space-xs bg-primary-container text-on-primary font-label-md text-label-md rounded-full hover:bg-primary shadow-sm active:scale-95 transition-all border-0 cursor-pointer flex items-center gap-1.5">
+                    <span>Post</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

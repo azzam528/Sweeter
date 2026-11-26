@@ -83,6 +83,16 @@ def init_indexes():
         db.posts.create_index([("hashtags", 1), ("date", -1)])
         # 23. Index pada images.filename untuk pengecekan referensi file sebelum penghapusan aman
         db.posts.create_index([("images.filename", 1)])
+        # 24. Compound index pada db.drafts (user_id, updated_at, _id) untuk listing draft milik user terbaru
+        db.drafts.create_index([("user_id", 1), ("updated_at", -1), ("_id", -1)])
+        # 25. Index pada images.filename di db.drafts untuk proteksi shared media saat hapus/edit
+        db.drafts.create_index([("images.filename", 1)])
+        # 26. Unique index (user_id, client_draft_key) untuk mencegah duplikasi draft akibat race/double-click
+        db.drafts.create_index(
+            [("user_id", 1), ("client_draft_key", 1)],
+            unique=True,
+            partialFilterExpression={"client_draft_key": {"$type": "string"}}
+        )
     except Exception as e:
         print(f"Warning saat inisialisasi index MongoDB: {e}")
 
