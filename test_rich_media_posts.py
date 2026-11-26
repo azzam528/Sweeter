@@ -269,6 +269,7 @@ class _MockDB:
         self.thumbs = _MockCollection()
         self.comments = _MockCollection()
         self.notifications = _MockCollection()
+        self.drafts = _MockCollection()
 
 
 def run_tests(use_mock_db=False):

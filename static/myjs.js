@@ -2790,14 +2790,115 @@ function execute_explore_search(query) {
 }
 
 // ==========================================
-// RICH MEDIA POST COMPOSER (UPLOAD & PREVIEW)
+// RICH MEDIA POST COMPOSER, DRAFTS & AUTOSAVE
 // ==========================================
 
 window.composerImages = [];
+window.composerExistingImages = [];
 const COMPOSER_MAX_IMAGES = 4;
 const COMPOSER_MAX_SIZE_BYTES = 5 * 1024 * 1024;
 const COMPOSER_ALLOWED_EXTS = ['jpg', 'jpeg', 'png', 'webp'];
 const COMPOSER_ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+const AUTOSAVE_DEBOUNCE_MS = 2000;
+
+function _generate_client_draft_key() {
+  return 'dk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+}
+
+window.draftState = {
+  draftId: null,
+  version: 0,
+  clientDraftKey: _generate_client_draft_key(),
+  seq: 0,
+  latestAppliedSeq: 0,
+  isSaving: false,
+  inFlightCreate: false,
+  pendingAfterCreate: false,
+  hasUnsavedChanges: false,
+  lastSavedSignature: '',
+  timer: null,
+  username: ''
+};
+
+function _get_draft_storage_key() {
+  const uname = window.draftState.username || ($('#post-composer').attr('data-username') || 'anon');
+  return `sweeter_active_draft_${uname}`;
+}
+
+function _persist_local_draft_state() {
+  try {
+    const key = _get_draft_storage_key();
+    const content = ($('#post-textarea').val() || '');
+    if (!window.draftState.draftId && !content.trim()) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, JSON.stringify({
+      draftId: window.draftState.draftId,
+      content: content,
+      updatedAt: Date.now()
+    }));
+  } catch (e) { }
+}
+
+function _clear_local_draft_state() {
+  try {
+    localStorage.removeItem(_get_draft_storage_key());
+  } catch (e) { }
+}
+
+function _sync_draft_url_param(draftId) {
+  try {
+    const url = new URL(window.location.href);
+    if (draftId) {
+      url.searchParams.set('draft_id', draftId);
+      url.searchParams.delete('new_draft');
+    } else {
+      url.searchParams.delete('draft_id');
+      url.searchParams.delete('new_draft');
+    }
+    window.history.replaceState({}, '', url.toString());
+  } catch (e) { }
+}
+
+function compute_composer_signature() {
+  const content = ($('#post-textarea').val() || '').trim();
+  const kept = window.composerExistingImages.map(img => img.filename).join(',');
+  const pending = window.composerImages.map(item => `${item.id}:${item.file.name}:${item.file.size}`).join(',');
+  return `${content}||${kept}||${pending}`;
+}
+
+function _format_hhmm(isoStr) {
+  try {
+    const d = isoStr ? new Date(isoStr) : new Date();
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return '';
+  }
+}
+
+function update_autosave_status(state, detail) {
+  const $el = $('#draft-autosave-status');
+  if (!$el.length) return;
+
+  if (state === 'idle') {
+    $el.html('').removeClass('text-error text-primary text-amber-700');
+  } else if (state === 'unsaved') {
+    $el.html('<span class="w-1.5 h-1.5 rounded-full bg-amber-600 inline-block"></span><span>Perubahan belum disimpan</span>')
+       .removeClass('text-error text-primary').addClass('text-amber-700');
+  } else if (state === 'saving') {
+    $el.html('<i class="fa fa-spinner fa-spin text-[11px]"></i><span>Menyimpan...</span>')
+       .removeClass('text-error text-amber-700').addClass('text-primary');
+  } else if (state === 'saved') {
+    const timeLabel = detail ? ` · ${escapeHtml(detail)}` : '';
+    $el.html(`<span class="w-1.5 h-1.5 rounded-full bg-emerald-600 inline-block"></span><span>Tersimpan${timeLabel}</span>`)
+       .removeClass('text-error text-amber-700').addClass('text-on-surface-variant');
+  } else if (state === 'error') {
+    $el.html('<span class="material-symbols-outlined text-[14px]">error_outline</span><span>Gagal menyimpan</span> <button type="button" onclick="save_draft_manual()" class="underline border-0 bg-transparent text-error cursor-pointer p-0 font-semibold ml-1">Coba lagi</button>')
+       .removeClass('text-primary text-amber-700').addClass('text-error');
+  }
+}
 
 function show_composer_error(msg) {
   $('#post-composer-error-text').text(msg);
@@ -2813,8 +2914,9 @@ function render_composer_previews() {
   const $container = $('#post-image-preview-container');
   const $grid = $('#post-image-preview-grid');
   const $countLabel = $('#post-image-count-label');
+  const totalCount = window.composerExistingImages.length + window.composerImages.length;
 
-  if (!window.composerImages.length) {
+  if (totalCount === 0) {
     $container.addClass('hidden');
     $grid.empty();
     $countLabel.text(`0 / ${COMPOSER_MAX_IMAGES} gambar dipilih`);
@@ -2822,15 +2924,32 @@ function render_composer_previews() {
     return;
   }
 
-  $countLabel.text(`${window.composerImages.length} / ${COMPOSER_MAX_IMAGES} gambar dipilih`);
+  $countLabel.text(`${totalCount} / ${COMPOSER_MAX_IMAGES} gambar dipilih`);
   $grid.empty();
+
+  window.composerExistingImages.forEach((img, index) => {
+    const safeUrl = escapeHtml(sanitizePostImageUrl(img.url));
+    const safeFname = escapeHtml(img.filename);
+    const $card = $(`
+      <div class="composer-preview-item" data-existing-filename="${safeFname}">
+        <img src="${safeUrl}" alt="Gambar tersimpan ${index + 1}"/>
+        <button type="button"
+                class="composer-preview-remove"
+                aria-label="Hapus gambar ${index + 1}"
+                title="Hapus gambar"
+                onclick="remove_composer_existing_image('${safeFname}')">&times;</button>
+      </div>
+    `);
+    $grid.append($card);
+  });
+
   window.composerImages.forEach((item, index) => {
     const $card = $(`
       <div class="composer-preview-item" data-image-id="${escapeHtml(item.id)}">
         <img src="${item.objectUrl}" alt="Preview ${index + 1}"/>
         <button type="button"
                 class="composer-preview-remove"
-                aria-label="Hapus gambar ${index + 1}"
+                aria-label="Hapus gambar baru ${index + 1}"
                 title="Hapus gambar"
                 onclick="remove_composer_image('${escapeHtml(item.id)}')">&times;</button>
       </div>
@@ -2839,11 +2958,18 @@ function render_composer_previews() {
   });
 
   $container.removeClass('hidden');
-  if (window.composerImages.length >= COMPOSER_MAX_IMAGES) {
+  if (totalCount >= COMPOSER_MAX_IMAGES) {
     $('#post-image-btn').prop('disabled', true).addClass('opacity-50 cursor-not-allowed');
   } else {
     $('#post-image-btn').prop('disabled', false).removeClass('opacity-50 cursor-not-allowed');
   }
+}
+
+function remove_composer_existing_image(filename) {
+  window.composerExistingImages = window.composerExistingImages.filter(img => img.filename !== filename);
+  hide_composer_error();
+  render_composer_previews();
+  schedule_draft_autosave();
 }
 
 function remove_composer_image(itemId) {
@@ -2857,26 +2983,305 @@ function remove_composer_image(itemId) {
   }
   hide_composer_error();
   render_composer_previews();
+  schedule_draft_autosave();
 }
 
-function clear_composer_images() {
+function clear_composer_images(skipAutosave = false) {
   window.composerImages.forEach(item => {
     if (item.objectUrl) {
       try { URL.revokeObjectURL(item.objectUrl); } catch (e) { }
     }
   });
   window.composerImages = [];
+  window.composerExistingImages = [];
   const fileInput = document.getElementById('post-image-input');
   if (fileInput) fileInput.value = '';
   render_composer_previews();
+  if (!skipAutosave && window.draftState.draftId) {
+    schedule_draft_autosave();
+  }
+}
+
+function reset_composer_draft_mode() {
+  if (window.draftState.timer) {
+    clearTimeout(window.draftState.timer);
+    window.draftState.timer = null;
+  }
+  window.draftState.latestAppliedSeq = ++window.draftState.seq;
+  window.draftState.draftId = null;
+  window.draftState.version = 0;
+  window.draftState.clientDraftKey = _generate_client_draft_key();
+  window.draftState.hasUnsavedChanges = false;
+  window.draftState.lastSavedSignature = '';
+  window.draftState.inFlightCreate = false;
+  window.draftState.pendingAfterCreate = false;
+
+  $('#post-textarea').val('');
+  clear_composer_images(true);
+  hide_composer_error();
+  $('#editing-draft-banner').addClass('hidden');
+  update_autosave_status('idle');
+  _clear_local_draft_state();
+  _sync_draft_url_param(null);
+}
+
+function schedule_draft_autosave() {
+  if (!$('#post-composer').length) return;
+
+  _persist_local_draft_state();
+
+  const content = ($('#post-textarea').val() || '').trim();
+  const hasAny = Boolean(content || window.composerExistingImages.length || window.composerImages.length);
+  const sig = compute_composer_signature();
+
+  if (!hasAny) {
+    if (window.draftState.timer) {
+      clearTimeout(window.draftState.timer);
+      window.draftState.timer = null;
+    }
+    if (!window.draftState.draftId) {
+      window.draftState.hasUnsavedChanges = false;
+      update_autosave_status('idle');
+    } else {
+      window.draftState.hasUnsavedChanges = true;
+      update_autosave_status('unsaved');
+    }
+    return;
+  }
+
+  if (sig === window.draftState.lastSavedSignature) {
+    window.draftState.hasUnsavedChanges = false;
+    return;
+  }
+
+  window.draftState.hasUnsavedChanges = true;
+  update_autosave_status('unsaved');
+
+  if (window.draftState.timer) {
+    clearTimeout(window.draftState.timer);
+  }
+  window.draftState.timer = setTimeout(function () {
+    window.draftState.timer = null;
+    save_draft_now({ manual: false });
+  }, AUTOSAVE_DEBOUNCE_MS);
+}
+
+function save_draft_manual() {
+  hide_composer_error();
+  save_draft_now({ manual: true });
+}
+
+function save_draft_now(options = {}) {
+  const isManual = Boolean(options.manual);
+  if (window.draftState.timer) {
+    clearTimeout(window.draftState.timer);
+    window.draftState.timer = null;
+  }
+
+  const content = ($('#post-textarea').val() || '').trim();
+  const hasAny = Boolean(content || window.composerExistingImages.length || window.composerImages.length);
+
+  if (!hasAny) {
+    if (isManual) {
+      show_composer_error('Tulis isi postingan atau pilih minimal satu gambar untuk disimpan sebagai draft.');
+      $('#post-textarea').focus();
+    }
+    return;
+  }
+
+  if (content.length > 5000) {
+    if (isManual) {
+      show_composer_error('Panjang draft maksimal 5.000 karakter.');
+    }
+    update_autosave_status('error');
+    return;
+  }
+
+  const sig = compute_composer_signature();
+  if (!isManual && sig === window.draftState.lastSavedSignature && window.draftState.draftId) {
+    window.draftState.hasUnsavedChanges = false;
+    return;
+  }
+
+  // Cegah duplikasi pembuatan draft ketika request create pertama masih berjalan
+  if (!window.draftState.draftId && window.draftState.inFlightCreate) {
+    window.draftState.pendingAfterCreate = true;
+    return;
+  }
+
+  const reqSeq = ++window.draftState.seq;
+  const isCreating = !window.draftState.draftId;
+  if (isCreating) {
+    window.draftState.inFlightCreate = true;
+  }
+
+  window.draftState.isSaving = true;
+  update_autosave_status('saving');
+
+  const $saveBtn = $('#post-save-draft-btn');
+  if (isManual && $saveBtn.length) {
+    $saveBtn.prop('disabled', true).addClass('opacity-75');
+  }
+
+  const uploadedItemIds = window.composerImages.map(x => x.id);
+  const fd = new FormData();
+  fd.append('content', content);
+  fd.append('keep_images', JSON.stringify(window.composerExistingImages.map(img => img.filename)));
+  fd.append('client_seq', String(reqSeq));
+  fd.append('client_draft_key', window.draftState.clientDraftKey);
+  if (!isCreating) {
+    fd.append('version', String(window.draftState.version));
+  }
+  window.composerImages.forEach(item => {
+    fd.append('images', item.file);
+  });
+
+  const url = isCreating ? '/api/drafts' : `/api/drafts/${encodeURIComponent(window.draftState.draftId)}`;
+  const method = isCreating ? 'POST' : 'PUT';
+
+  $.ajax({
+    type: method,
+    url: url,
+    data: fd,
+    contentType: false,
+    processData: false,
+    success: function (res) {
+      if (isCreating) {
+        window.draftState.inFlightCreate = false;
+      }
+
+      // Abaikan respons request lama yang datang terlambat (out-of-order protection)
+      if (reqSeq < window.draftState.latestAppliedSeq) {
+        return;
+      }
+
+      if (res.result === 'success' && res.draft) {
+        window.draftState.latestAppliedSeq = reqSeq;
+        window.draftState.draftId = res.draft._id;
+        window.draftState.version = res.draft.version || 1;
+
+        // Sinkronkan gambar yang baru terunggah dari composerImages ke composerExistingImages
+        if (uploadedItemIds.length > 0) {
+          const uploadedSet = new Set(uploadedItemIds);
+          window.composerImages = window.composerImages.filter(item => {
+            if (uploadedSet.has(item.id)) {
+              if (item.objectUrl) {
+                try { URL.revokeObjectURL(item.objectUrl); } catch (e) { }
+              }
+              return false;
+            }
+            return true;
+          });
+          window.composerExistingImages = Array.isArray(res.draft.images) ? res.draft.images : [];
+          render_composer_previews();
+        }
+
+        const currentSig = compute_composer_signature();
+        if (reqSeq === window.draftState.seq) {
+          window.draftState.lastSavedSignature = currentSig;
+          window.draftState.hasUnsavedChanges = false;
+          update_autosave_status('saved', _format_hhmm(res.draft.last_saved_at));
+        } else {
+          // Ada perubahan lebih baru yang diketik selama request berjalan
+          window.draftState.hasUnsavedChanges = true;
+          update_autosave_status('unsaved');
+        }
+
+        $('#editing-draft-banner').removeClass('hidden');
+        _sync_draft_url_param(res.draft._id);
+        _persist_local_draft_state();
+        fetch_drafts_count();
+
+        if (window.draftState.pendingAfterCreate || reqSeq < window.draftState.seq) {
+          window.draftState.pendingAfterCreate = false;
+          save_draft_now({ manual: false });
+        }
+      } else {
+        update_autosave_status('error');
+        if (isManual) show_composer_error(res.msg || 'Gagal menyimpan draft.');
+      }
+    },
+    error: function (xhr) {
+      if (isCreating) {
+        window.draftState.inFlightCreate = false;
+      }
+      if (xhr.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      // Jika stale sequence/version ditolak 409, abaikan jika sudah ada request lebih baru
+      if (xhr.status === 409 && reqSeq < window.draftState.seq) {
+        return;
+      }
+      update_autosave_status('error');
+      const msg = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : 'Gagal menyimpan draft.';
+      if (isManual) {
+        show_composer_error(msg);
+      }
+    },
+    complete: function () {
+      if (reqSeq === window.draftState.seq) {
+        window.draftState.isSaving = false;
+      }
+      if (isManual && $saveBtn.length) {
+        $saveBtn.prop('disabled', false).removeClass('opacity-75');
+      }
+    }
+  });
+}
+
+function load_draft_into_composer(draftId, fallbackContent = '') {
+  if (!draftId) return;
+  $.ajax({
+    type: 'GET',
+    url: `/api/drafts/${encodeURIComponent(draftId)}`,
+    success: function (res) {
+      if (res.result === 'success' && res.draft) {
+        const d = res.draft;
+        clear_composer_images(true);
+        window.draftState.draftId = d._id;
+        window.draftState.version = d.version || 1;
+        window.draftState.clientDraftKey = d.client_draft_key || _generate_client_draft_key();
+        window.draftState.hasUnsavedChanges = false;
+        window.composerExistingImages = Array.isArray(d.images) ? d.images.map(img => ({ ...img })) : [];
+
+        $('#post-textarea').val(d.content || '');
+        render_composer_previews();
+        window.draftState.lastSavedSignature = compute_composer_signature();
+
+        $('#editing-draft-banner').removeClass('hidden');
+        update_autosave_status('saved', _format_hhmm(d.last_saved_at || d.updated_at));
+        _sync_draft_url_param(d._id);
+        _persist_local_draft_state();
+      }
+    },
+    error: function (xhr) {
+      // Jika draft sudah dihapus atau tidak tersedia, bersihkan referensi lokal dengan aman
+      _clear_local_draft_state();
+      _sync_draft_url_param(null);
+      if (xhr.status === 404 || xhr.status === 403) {
+        if (fallbackContent && fallbackContent.trim()) {
+          $('#post-textarea').val(fallbackContent);
+          schedule_draft_autosave();
+        }
+      }
+    }
+  });
 }
 
 function submit_rich_post() {
   hide_composer_error();
-  const content = ($('#post-textarea').val() || '').trim();
-  const hasImages = window.composerImages.length > 0;
+  if (window.draftState.timer) {
+    clearTimeout(window.draftState.timer);
+    window.draftState.timer = null;
+  }
+  // Naikkan latestAppliedSeq agar response autosave lama tidak menimpa/mengubah state setelah publish
+  window.draftState.latestAppliedSeq = ++window.draftState.seq;
 
-  if (!content && !hasImages) {
+  const content = ($('#post-textarea').val() || '').trim();
+  const totalImages = window.composerExistingImages.length + window.composerImages.length;
+
+  if (!content && totalImages === 0) {
     show_composer_error('Tulis isi postingan atau pilih minimal satu gambar.');
     $('#post-textarea').focus();
     return;
@@ -2887,7 +3292,7 @@ function submit_rich_post() {
     return;
   }
 
-  if (window.composerImages.length > COMPOSER_MAX_IMAGES) {
+  if (totalImages > COMPOSER_MAX_IMAGES) {
     show_composer_error(`Maksimal ${COMPOSER_MAX_IMAGES} gambar per postingan.`);
     return;
   }
@@ -2897,24 +3302,33 @@ function submit_rich_post() {
   $btn.prop('disabled', true).addClass('opacity-75 cursor-not-allowed')
     .html('<i class="fa fa-spinner fa-spin text-[13px]"></i><span>Mengunggah...</span>');
 
+  const activeDraftId = window.draftState.draftId;
   const formData = new FormData();
-  formData.append('comment_give', content);
   formData.append('date_give', new Date().toISOString());
+
+  let targetUrl = '/posting';
+  if (activeDraftId) {
+    targetUrl = `/api/drafts/${encodeURIComponent(activeDraftId)}/publish`;
+    formData.append('content', content);
+    formData.append('keep_images', JSON.stringify(window.composerExistingImages.map(img => img.filename)));
+  } else {
+    formData.append('comment_give', content);
+  }
+
   window.composerImages.forEach(item => {
     formData.append('images', item.file);
   });
 
   $.ajax({
     type: 'POST',
-    url: '/posting',
+    url: targetUrl,
     data: formData,
     contentType: false,
     processData: false,
     success: function (response) {
       if (response.result === 'success') {
-        $('#post-textarea').val('');
-        clear_composer_images();
-        hide_composer_error();
+        reset_composer_draft_mode();
+        fetch_drafts_count();
         get_posts('', window.currentFeedTab || 'following', '', false);
       } else {
         show_composer_error(response.msg || 'Gagal membuat postingan.');
@@ -2938,6 +3352,8 @@ function submit_rich_post() {
 }
 
 function init_rich_post_composer() {
+  window.draftState.username = $('#post-composer').attr('data-username') || '';
+
   const $fileInput = $('#post-image-input');
   if ($fileInput.length) {
     $fileInput.on('change', function () {
@@ -2951,7 +3367,7 @@ function init_rich_post_composer() {
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        if (window.composerImages.length >= COMPOSER_MAX_IMAGES) {
+        if ((window.composerExistingImages.length + window.composerImages.length) >= COMPOSER_MAX_IMAGES) {
           errors.push(`Maksimal ${COMPOSER_MAX_IMAGES} gambar dalam satu postingan.`);
           break;
         }
@@ -2981,15 +3397,285 @@ function init_rich_post_composer() {
         show_composer_error(errors[0]);
       }
       render_composer_previews();
+      schedule_draft_autosave();
     });
   }
+
+  $('#post-textarea').on('input', function () {
+    schedule_draft_autosave();
+  });
 
   $('#post-submit-btn').off('click').on('click', function () {
     submit_rich_post();
   });
 
-  $(window).on('beforeunload', function () {
-    clear_composer_images();
+  // Pulihkan draft dari ?draft_id= atau localStorage saat halaman dimuat ulang
+  const urlParams = new URLSearchParams(window.location.search);
+  const draftIdParam = urlParams.get('draft_id');
+  const newDraftParam = urlParams.get('new_draft');
+
+  if (newDraftParam === '1') {
+    reset_composer_draft_mode();
+  } else if (draftIdParam) {
+    load_draft_into_composer(draftIdParam);
+  } else {
+    try {
+      const savedRaw = localStorage.getItem(_get_draft_storage_key());
+      if (savedRaw) {
+        const saved = JSON.parse(savedRaw);
+        if (saved && saved.draftId) {
+          load_draft_into_composer(saved.draftId, saved.content || '');
+        } else if (saved && saved.content && saved.content.trim()) {
+          $('#post-textarea').val(saved.content);
+          schedule_draft_autosave();
+        }
+      }
+    } catch (e) { }
+  }
+
+  $(window).on('beforeunload', function (e) {
+    if (window.draftState.hasUnsavedChanges || window.draftState.isSaving) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+    window.composerImages.forEach(item => {
+      if (item.objectUrl) {
+        try { URL.revokeObjectURL(item.objectUrl); } catch (err) { }
+      }
+    });
+  });
+}
+
+// ==========================================
+// DRAFT MANAGEMENT PAGE & BADGES
+// ==========================================
+
+window.draftsNextCursor = null;
+window.draftsHasMore = false;
+window.draftsLoading = false;
+
+function update_drafts_badges(count) {
+  const num = parseInt(count || '0', 10);
+  const display = num > 99 ? '99+' : String(num);
+  ['#nav-drafts-badge', '#header-drafts-badge'].forEach(sel => {
+    const $b = $(sel);
+    if (!$b.length) return;
+    if (num > 0) {
+      $b.text(display).removeClass('hidden');
+    } else {
+      $b.addClass('hidden');
+    }
+  });
+  const $pageCount = $('#draft-count-display');
+  if ($pageCount.length) {
+    $pageCount.text(num);
+  }
+}
+
+function fetch_drafts_count() {
+  $.ajax({
+    type: 'GET',
+    url: '/api/drafts/count',
+    success: function (res) {
+      if (res && res.result === 'success') {
+        update_drafts_badges(res.draft_count);
+      }
+    }
+  });
+}
+
+$(document).ready(function () {
+  if ($('#nav-drafts-badge').length || $('#header-drafts-badge').length) {
+    fetch_drafts_count();
+  }
+});
+
+function render_empty_drafts() {
+  $('#drafts-box').html(`
+    <div class="text-center py-14 px-6 bg-surface-container-lowest rounded-xl shadow-sm my-2" id="drafts-empty-state">
+      <span class="material-symbols-outlined text-[46px] text-outline-variant mb-2 block mx-auto">drafts</span>
+      <h3 class="font-headline-sm text-[17px] font-bold text-on-surface mb-1">Belum ada draft tersimpan</h3>
+      <p class="font-body-sm text-secondary max-w-sm mx-auto mb-4 leading-relaxed">
+        Saat Anda menulis di beranda dan menyimpannya (atau otomatis tersimpan), draft akan muncul di sini.
+      </p>
+      <a href="/?new_draft=1" class="inline-block px-5 py-2 rounded-full bg-primary-container text-on-primary font-label-md text-label-md hover:bg-primary transition-all border-0 cursor-pointer shadow-sm no-underline">
+        Tulis Postingan Baru
+      </a>
+    </div>
+  `);
+}
+
+function render_draft_card(draft) {
+  const id = escapeHtml(draft._id);
+  const rawContent = draft.content || '';
+  const contentHtml = rawContent
+    ? `<p class="font-body-md text-body-md text-on-surface mb-space-sm leading-relaxed whitespace-pre-wrap line-clamp-6">${escapeHtml(rawContent)}</p>`
+    : `<p class="font-body-sm text-body-sm text-on-surface-variant italic mb-space-sm">(Draft berisi gambar tanpa teks)</p>`;
+
+  const imagesHtml = render_post_images_html(draft.images || [], `draft-${draft._id}`, true);
+  const updatedStr = draft.updated_at ? new Date(draft.updated_at).toLocaleString('id-ID') : '-';
+  const createdStr = draft.created_at ? new Date(draft.created_at).toLocaleString('id-ID') : '-';
+
+  return `
+    <article class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-outline-variant/25 transition-all hover:shadow-md" id="draft-card-${id}">
+      <div class="flex items-center justify-between gap-2 mb-space-sm">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-secondary-container text-on-secondary-container font-label-sm text-label-sm font-semibold">
+            <span class="material-symbols-outlined text-[14px]">drafts</span>
+            <span>Draft</span>
+          </span>
+          <span class="font-caption text-caption text-on-surface-variant">Diperbarui: ${escapeHtml(updatedStr)}</span>
+        </div>
+        <span class="font-caption text-caption text-outline hidden sm:inline">Dibuat: ${escapeHtml(createdStr)}</span>
+      </div>
+
+      ${contentHtml}
+      ${imagesHtml}
+
+      <div class="flex items-center justify-end gap-space-xs pt-space-sm mt-space-xs border-t border-surface-container-high/70 flex-wrap">
+        <a href="/?draft_id=${encodeURIComponent(draft._id)}"
+           class="px-space-md py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm text-label-sm transition-colors no-underline flex items-center gap-1">
+          <span class="material-symbols-outlined text-[16px]">edit</span>
+          <span>Lanjutkan Mengedit</span>
+        </a>
+        <button type="button"
+                onclick="delete_draft_item('${id}')"
+                class="px-space-md py-1.5 rounded-full bg-error-container/70 hover:bg-error-container text-on-error-container font-label-sm text-label-sm transition-colors border-0 cursor-pointer flex items-center gap-1">
+          <span class="material-symbols-outlined text-[16px]">delete</span>
+          <span>Hapus</span>
+        </button>
+        <button type="button"
+                id="btn-publish-draft-${id}"
+                onclick="publish_draft_item('${id}')"
+                class="px-space-md py-1.5 rounded-full bg-primary-container hover:bg-primary text-on-primary font-label-sm text-label-sm transition-colors border-0 cursor-pointer shadow-sm flex items-center gap-1">
+          <span class="material-symbols-outlined text-[16px]">send</span>
+          <span>Publikasikan</span>
+        </button>
+      </div>
+    </article>
+  `;
+}
+
+function load_drafts(cursor = '', append = false) {
+  if (window.draftsLoading) return;
+  window.draftsLoading = true;
+
+  if (append) {
+    $('#drafts-loading').removeClass('hidden');
+    $('#drafts-load-more-btn').prop('disabled', true).html('<i class="fa fa-spinner fa-spin mr-1"></i> Memuat...');
+  } else {
+    $('#drafts-load-more-container').addClass('hidden');
+    $('#drafts-box').html(`
+      <div class="text-center text-on-surface-variant py-8 font-body-sm">
+        <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat daftar draft…
+      </div>
+    `);
+  }
+
+  let url = '/api/drafts?limit=20';
+  if (cursor) {
+    url += `&cursor=${encodeURIComponent(cursor)}`;
+  }
+
+  $.ajax({
+    type: 'GET',
+    url: url,
+    success: function (res) {
+      if (res.result === 'success') {
+        const drafts = res.drafts || [];
+        window.draftsNextCursor = res.next_cursor;
+        window.draftsHasMore = Boolean(res.has_more);
+        update_drafts_badges(res.total_count);
+
+        if (!append) $('#drafts-box').empty();
+        if (!drafts.length) {
+          if (!append) render_empty_drafts();
+          $('#drafts-load-more-container').addClass('hidden');
+          return;
+        }
+
+        drafts.forEach(d => {
+          $('#drafts-box').append(render_draft_card(d));
+        });
+
+        if (window.draftsHasMore) {
+          $('#drafts-load-more-container').removeClass('hidden');
+          $('#drafts-load-more-btn').prop('disabled', false).html('Muat Lebih Banyak');
+        } else {
+          $('#drafts-load-more-container').addClass('hidden');
+        }
+      } else {
+        handle_ajax_error(null, res.msg || 'Gagal memuat daftar draft.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal memuat daftar draft.');
+    },
+    complete: function () {
+      window.draftsLoading = false;
+      $('#drafts-loading').addClass('hidden');
+    }
+  });
+}
+
+function load_more_drafts() {
+  if (window.draftsLoading || !window.draftsHasMore || !window.draftsNextCursor) return;
+  load_drafts(window.draftsNextCursor, true);
+}
+
+function delete_draft_item(draftId) {
+  if (!confirm('Apakah Anda yakin ingin menghapus draft ini secara permanen?')) {
+    return;
+  }
+
+  $.ajax({
+    type: 'DELETE',
+    url: `/api/drafts/${encodeURIComponent(draftId)}`,
+    success: function (res) {
+      if (res.result === 'success') {
+        $(`#draft-card-${draftId}`).fadeOut(250, function () {
+          $(this).remove();
+          if ($('#drafts-box > article').length === 0) {
+            render_empty_drafts();
+          }
+        });
+        fetch_drafts_count();
+      } else {
+        alert(res.msg || 'Gagal menghapus draft.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal menghapus draft.');
+    }
+  });
+}
+
+function publish_draft_item(draftId) {
+  const $btn = $(`#btn-publish-draft-${draftId}`);
+  const origHtml = $btn.html();
+  $btn.prop('disabled', true).addClass('opacity-75').html('<i class="fa fa-spinner fa-spin text-[12px]"></i><span>Menerbitkan...</span>');
+
+  $.ajax({
+    type: 'POST',
+    url: `/api/drafts/${encodeURIComponent(draftId)}/publish`,
+    success: function (res) {
+      if (res.result === 'success') {
+        $(`#draft-card-${draftId}`).fadeOut(250, function () {
+          $(this).remove();
+          if ($('#drafts-box > article').length === 0) {
+            render_empty_drafts();
+          }
+        });
+        fetch_drafts_count();
+      } else {
+        $btn.prop('disabled', false).removeClass('opacity-75').html(origHtml);
+        alert(res.msg || 'Gagal memublikasikan draft.');
+      }
+    },
+    error: function (xhr) {
+      $btn.prop('disabled', false).removeClass('opacity-75').html(origHtml);
+      handle_ajax_error(xhr, 'Gagal memublikasikan draft.');
+    }
   });
 }
 
