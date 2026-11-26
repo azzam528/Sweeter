@@ -153,6 +153,10 @@
           <span class="material-symbols-outlined text-[22px]">explore</span>
           <span class="font-label-md text-label-md">Explore</span>
         </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/communities">
+          <span class="material-symbols-outlined text-[22px]">groups</span>
+          <span class="font-label-md text-label-md">Communities</span>
+        </a>
         <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/user/{{ user_info.username | e }}">
           <span class="material-symbols-outlined text-[22px]">person</span>
           <span class="font-label-md text-label-md">Profile</span>
@@ -291,6 +295,11 @@
                     <span class="material-symbols-outlined text-[20px]">image</span>
                     <span class="font-label-sm text-label-sm">Foto</span>
                   </button>
+                  <select id="post-community-select"
+                          aria-label="Pilih target audiens"
+                          class="px-2.5 py-1 rounded-full bg-surface-container-low text-on-surface-variant font-label-sm text-label-sm border border-outline-variant/40 focus:outline-none focus:ring-1 focus:ring-primary-container max-w-[175px]">
+                    <option value="">Publik (Semua)</option>
+                  </select>
                   <span id="draft-autosave-status" class="font-caption text-caption text-on-surface-variant flex items-center gap-1 ml-1" aria-live="polite"></span>
                 </div>
                 <div class="flex items-center gap-space-xs">
@@ -389,6 +398,9 @@
 
     // Initialize rich media composer (image preview & upload)
     init_rich_post_composer();
+    if (typeof load_composer_communities === 'function') {
+      load_composer_communities();
+    }
 
     // Allow pressing Enter (without Shift) in textarea to submit
     $('#post-textarea').on('keydown', function (e) {

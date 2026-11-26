@@ -56,10 +56,14 @@ app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["UPLOAD_FOLDER"] = "./static/profile_pics"
 
-# Konfigurasi Upload Media Postingan (dapat dikonfigurasi via env var untuk deployment/Docker)
+# Konfigurasi Upload Media Postingan & Komunitas (dapat dikonfigurasi via env var untuk deployment/Docker)
 DEFAULT_POST_UPLOAD_DIR = os.path.join(app.root_path, "uploads", "posts")
 app.config["POST_UPLOAD_DIR"] = os.path.abspath(
     os.getenv("POST_UPLOAD_DIR") or DEFAULT_POST_UPLOAD_DIR
+)
+DEFAULT_COMMUNITY_UPLOAD_DIR = os.path.join(app.root_path, "uploads", "communities")
+app.config["COMMUNITY_UPLOAD_DIR"] = os.path.abspath(
+    os.getenv("COMMUNITY_UPLOAD_DIR") or DEFAULT_COMMUNITY_UPLOAD_DIR
 )
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25 MB total request limit (4 x 5MB + overhead)
 
@@ -458,9 +462,9 @@ def validate_post_image_file(file_storage):
     return data, ext, canonical_mime, len(data)
 
 
-def save_post_image_file(data: bytes, ext: str, mime_type: str) -> dict:
-    """Menyimpan byte gambar tervalidasi ke POST_UPLOAD_DIR dengan nama unik yang aman."""
-    upload_dir = os.path.abspath(app.config["POST_UPLOAD_DIR"])
+def _save_validated_image_to_dir(data: bytes, ext: str, mime_type: str, target_dir: str, url_prefix: str) -> dict:
+    """Helper terpusat untuk menyimpan byte gambar tervalidasi ke direktori target secara aman."""
+    upload_dir = os.path.abspath(target_dir)
     os.makedirs(upload_dir, exist_ok=True)
 
     ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -477,36 +481,30 @@ def save_post_image_file(data: bytes, ext: str, mime_type: str) -> dict:
 
     return {
         "filename": filename,
-        "url": f"/uploads/posts/{filename}",
+        "url": f"{url_prefix}/{filename}",
         "mime_type": mime_type,
         "size": len(data),
     }
 
 
-def safe_delete_post_image(filename: str, check_db_refs: bool = True) -> bool:
-    """
-    Menghapus file gambar post dari disk secara aman setelah memvalidasi nama file
-    dan memastikan tidak ada dokumen postingan lain yang masih mereferensikannya.
-    """
-    if not filename or not isinstance(filename, str):
-        return False
-    if not SAFE_POST_IMAGE_FILENAME_RE.match(filename):
-        return False
+def save_post_image_file(data: bytes, ext: str, mime_type: str) -> dict:
+    """Menyimpan byte gambar tervalidasi ke POST_UPLOAD_DIR dengan nama unik yang aman."""
+    return _save_validated_image_to_dir(data, ext, mime_type, app.config["POST_UPLOAD_DIR"], "/uploads/posts")
 
-    if check_db_refs:
-        try:
-            if db.posts.count_documents({"images.filename": filename}) > 0:
-                return False
-            if db.drafts.count_documents({"images.filename": filename}) > 0:
-                return False
-        except Exception:
-            return False
 
-    upload_dir = os.path.abspath(app.config["POST_UPLOAD_DIR"])
+def save_community_image_file(data: bytes, ext: str, mime_type: str) -> dict:
+    """Menyimpan gambar profil atau sampul komunitas tervalidasi ke COMMUNITY_UPLOAD_DIR."""
+    return _save_validated_image_to_dir(data, ext, mime_type, app.config["COMMUNITY_UPLOAD_DIR"], "/uploads/communities")
+
+
+def _safe_remove_image_file(filename: str, target_dir: str) -> bool:
+    """Menghapus file gambar secara aman dari target_dir setelah memastikan tidak ada path traversal."""
+    if not filename or not isinstance(filename, str) or not SAFE_POST_IMAGE_FILENAME_RE.match(filename):
+        return False
+    upload_dir = os.path.abspath(target_dir)
     target_path = os.path.abspath(os.path.join(upload_dir, filename))
     if os.path.commonpath([upload_dir, target_path]) != upload_dir:
         return False
-
     try:
         if os.path.isfile(target_path):
             os.remove(target_path)
@@ -516,13 +514,52 @@ def safe_delete_post_image(filename: str, check_db_refs: bool = True) -> bool:
     return False
 
 
-@app.route('/uploads/posts/<path:filename>', methods=['GET'])
-def serve_post_image(filename):
-    """Menyajikan gambar postingan secara aman tanpa membuka akses ke direktori lain."""
+def safe_delete_post_image(filename: str, check_db_refs: bool = True) -> bool:
+    """
+    Menghapus file gambar post dari disk secara aman setelah memvalidasi nama file
+    dan memastikan tidak ada dokumen postingan/draft lain yang masih mereferensikannya.
+    """
+    if not filename or not isinstance(filename, str) or not SAFE_POST_IMAGE_FILENAME_RE.match(filename):
+        return False
+
+    if check_db_refs:
+        try:
+            if db.posts.count_documents({"images.filename": filename}) > 0:
+                return False
+            if hasattr(db, "drafts") and db.drafts.count_documents({"images.filename": filename}) > 0:
+                return False
+        except Exception:
+            return False
+
+    return _safe_remove_image_file(filename, app.config["POST_UPLOAD_DIR"])
+
+
+def safe_delete_community_image(filename: str, check_db_refs: bool = True) -> bool:
+    """Menghapus gambar profil/sampul komunitas dari disk jika tidak lagi direferensikan."""
+    if not filename or not isinstance(filename, str) or not SAFE_POST_IMAGE_FILENAME_RE.match(filename):
+        return False
+
+    if check_db_refs:
+        try:
+            if hasattr(db, "communities") and db.communities.count_documents({
+                "$or": [
+                    {"profile_image.filename": filename},
+                    {"cover_image.filename": filename},
+                ]
+            }) > 0:
+                return False
+        except Exception:
+            return False
+
+    return _safe_remove_image_file(filename, app.config["COMMUNITY_UPLOAD_DIR"])
+
+
+def _serve_safe_upload_dir(filename: str, target_dir: str):
+    """Menyajikan file upload gambar secara aman dengan validasi regex dan pencegahan path traversal."""
     if not filename or not SAFE_POST_IMAGE_FILENAME_RE.match(filename):
         abort(404)
 
-    upload_dir = os.path.abspath(app.config["POST_UPLOAD_DIR"])
+    upload_dir = os.path.abspath(target_dir)
     target_path = os.path.abspath(os.path.join(upload_dir, filename))
     if os.path.commonpath([upload_dir, target_path]) != upload_dir:
         abort(404)
@@ -535,11 +572,69 @@ def serve_post_image(filename):
     return response
 
 
-def _create_published_post(user_info: dict, comment_text: str, date_str: str = None, images_list: list = None) -> dict:
+@app.route('/uploads/posts/<path:filename>', methods=['GET'])
+def serve_post_image(filename):
+    """Menyajikan gambar postingan secara aman tanpa membuka akses ke direktori lain."""
+    return _serve_safe_upload_dir(filename, app.config["POST_UPLOAD_DIR"])
+
+
+@app.route('/uploads/communities/<path:filename>', methods=['GET'])
+def serve_community_image(filename):
+    """Menyajikan gambar profil dan sampul komunitas secara aman."""
+    return _serve_safe_upload_dir(filename, app.config["COMMUNITY_UPLOAD_DIR"])
+
+
+def _get_community_membership(community_id: str, username: str):
+    """Mengambil dokumen keanggotaan user pada suatu komunitas jika ada."""
+    if not community_id or not username or not hasattr(db, "community_members"):
+        return None
+    return db.community_members.find_one({"community_id": str(community_id), "user_id": username})
+
+
+def _is_community_member(community_id: str, username: str) -> bool:
+    """Memeriksa apakah user terdaftar sebagai anggota komunitas."""
+    return bool(_get_community_membership(community_id, username))
+
+
+def _get_user_joined_community_ids(username: str) -> list:
+    """Mengembalikan daftar community_id yang diikuti user."""
+    if not username or not hasattr(db, "community_members"):
+        return []
+    return list(db.community_members.distinct("community_id", {"user_id": username}))
+
+
+def _user_can_access_post(post_doc: dict, current_username: str = None) -> bool:
     """
-    Helper terpusat untuk memvalidasi dan membuat dokumen postingan publik baru di db.posts.
-    Digunakan bersama oleh POST /posting dan POST /api/drafts/<draft_id>/publish agar tidak
-    ada duplikasi logika pembuatan postingan.
+    Memastikan postingan dari komunitas private tidak dapat diakses non-anggota.
+    Postingan publik dan komunitas public selalu dapat diakses.
+    """
+    if not post_doc:
+        return False
+    if post_doc.get("community_visibility") != "private":
+        return True
+    cid = post_doc.get("community_id")
+    if not cid or not current_username:
+        return False
+    return _is_community_member(str(cid), current_username)
+
+
+def _private_post_visibility_filter(current_username: str = None) -> dict:
+    """Filter MongoDB untuk menyaring postingan komunitas private agar hanya terlihat oleh anggotanya."""
+    joined_ids = _get_user_joined_community_ids(current_username) if current_username else []
+    if joined_ids:
+        return {
+            "$or": [
+                {"community_visibility": {"$ne": "private"}},
+                {"community_id": {"$in": joined_ids}},
+            ]
+        }
+    return {"community_visibility": {"$ne": "private"}}
+
+
+def _create_published_post(user_info: dict, comment_text: str, date_str: str = None, images_list: list = None, community: dict = None) -> dict:
+    """
+    Helper terpusat untuk memvalidasi dan membuat dokumen postingan publik/komunitas di db.posts.
+    Digunakan bersama oleh POST /posting, POST /api/communities/<id>/posts, dan POST /api/drafts/<draft_id>/publish.
     """
     comment_clean = (comment_text or '').strip() if isinstance(comment_text, str) else ''
     images_clean = list(images_list) if isinstance(images_list, list) else []
@@ -564,6 +659,12 @@ def _create_published_post(user_info: dict, comment_text: str, date_str: str = N
         'hashtags': tags,
         'images': images_clean,
     }
+    if community:
+        doc['community_id'] = str(community['_id'])
+        doc['community_name'] = community.get('name', '')
+        doc['community_slug'] = community.get('slug', '')
+        doc['community_visibility'] = community.get('visibility', 'public')
+
     res = db.posts.insert_one(doc)
     doc['_id'] = str(res.inserted_id)
     return doc
@@ -589,6 +690,24 @@ def posting():
 
     comment_receive = (request.form.get('comment_give') or request.form.get('comment') or '').strip()
     date_receive = request.form.get('date_give') or datetime.now(timezone.utc).isoformat()
+
+    # Cek target komunitas opsional (jika user memposting ke dalam Circle/Community)
+    community_id_raw = (request.form.get('community_id') or '').strip()
+    community_slug_raw = (request.form.get('community_slug') or '').strip().lower()
+    target_community = None
+    if community_id_raw or community_slug_raw:
+        if not hasattr(db, 'communities'):
+            return jsonify({'result': 'fail', 'msg': 'Community module unavailable'}), 500
+        if community_id_raw:
+            if not ObjectId.is_valid(community_id_raw):
+                return jsonify({'result': 'fail', 'msg': 'Invalid community ID format'}), 400
+            target_community = db.communities.find_one({'_id': ObjectId(community_id_raw)})
+        else:
+            target_community = db.communities.find_one({'slug': community_slug_raw})
+        if not target_community:
+            return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+        if not _is_community_member(str(target_community['_id']), user_info.get('username')):
+            return jsonify({'result': 'fail', 'msg': 'Anda harus bergabung dengan komunitas ini untuk membuat postingan di dalamnya.'}), 403
 
     raw_files = []
     for key in ('images', 'images[]', 'file_give'):
@@ -630,12 +749,14 @@ def posting():
             comment_text=comment_receive,
             date_str=date_receive,
             images_list=saved_images,
+            community=target_community,
         )
         return jsonify({
             'result': 'success',
             'msg': 'Posting successfull',
             'post_id': created_doc['_id'],
             'images': saved_images,
+            'community_id': created_doc.get('community_id'),
         })
     except ValueError as verr:
         for img in saved_images:
@@ -839,18 +960,19 @@ def get_posts():
     except ValueError:
         return jsonify({'result': 'fail', 'msg': 'Invalid limit parameter'}), 400
 
-    # 2. Penentuan filter pengguna (Author Filter)
+    # 2. Penentuan filter pengguna (Author Filter) & perlindungan privasi komunitas private
+    visibility_filter = _private_post_visibility_filter(current_username)
     if username_receive:
-        # Mode Profil: hanya postingan milik pengguna yang diminta
-        query = {'username': username_receive}
+        # Mode Profil: hanya postingan milik pengguna yang diminta (tanpa membocorkan post komunitas private)
+        query = {'$and': [{'username': username_receive}, visibility_filter]}
     elif tab in ['following', 'timeline']:
         # Mode Personalized Timeline: postingan diri sendiri + akun yang diikuti
         following_users = db.follows.distinct('following', {'follower': current_username})
         allowed_authors = [current_username] + following_users
-        query = {'username': {'$in': allowed_authors}}
+        query = {'$and': [{'username': {'$in': allowed_authors}}, visibility_filter]}
     else:
-        # Mode Explore / All / Default (mempertahankan kompatibilitas endpoint lama): semua postingan publik
-        query = {}
+        # Mode Explore / All / Default: postingan publik (dan komunitas private yang diikuti)
+        query = visibility_filter
 
     # 3. Penanganan Cursor Pagination (Keyset Pagination)
     if cursor:
@@ -911,6 +1033,10 @@ def update_like():
         post_id_receive = request.form.get('post_id_give')
         type_receive = request.form.get('type_give')
         action_receive = request.form.get('action_give')
+        if post_id_receive and ObjectId.is_valid(post_id_receive):
+            target_post_check = db.posts.find_one({'_id': ObjectId(post_id_receive)})
+            if target_post_check and not _user_can_access_post(target_post_check, user_info.get('username') if user_info else None):
+                return jsonify({'result': 'fail', 'msg': 'Anda tidak memiliki akses ke postingan komunitas privat ini.'}), 403
         doc = {
             'post_id' : post_id_receive,
             'username' : user_info.get('username'),
@@ -1017,6 +1143,12 @@ def create_comment():
             'result': 'fail',
             'msg': 'Target post not found'
         }), 404
+
+    if not _user_can_access_post(target_post, username):
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Anda tidak memiliki akses ke postingan komunitas privat ini.'
+        }), 403
 
     # 2. Validasi konten komentar
     if not content_receive:
@@ -1142,6 +1274,12 @@ def get_comments():
             'result': 'fail',
             'msg': 'Target post not found'
         }), 404
+
+    if not _user_can_access_post(target_post, current_user):
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Anda tidak memiliki akses ke postingan komunitas privat ini.'
+        }), 403
 
     # 2. Ambil komentar terurut ascending berdasarkan waktu pembuatan
     comments_cursor = db.comments.find({'post_id': str(post_id_receive)}).sort('created_at', 1)
@@ -1658,10 +1796,12 @@ def bookmark_post(post_id=None):
     if not ObjectId.is_valid(target_pid):
         return jsonify({'result': 'fail', 'msg': 'Invalid post ID format'}), 400
 
-    # Pastikan postingan ada di db.posts
+    # Pastikan postingan ada di db.posts dan user berhak mengaksesnya
     post_doc = db.posts.find_one({'_id': ObjectId(target_pid)})
     if not post_doc:
         return jsonify({'result': 'fail', 'msg': 'Post not found'}), 404
+    if not _user_can_access_post(post_doc, current_username):
+        return jsonify({'result': 'fail', 'msg': 'Anda tidak memiliki akses ke postingan komunitas privat ini.'}), 403
 
     # Cegah duplikasi bookmark
     existing = db.bookmarks.find_one({'username': current_username, 'post_id': target_pid})
@@ -2178,6 +2318,9 @@ def get_single_post_api(post_id):
     if not post_doc:
         return jsonify({'result': 'fail', 'msg': 'Post not found'}), 404
 
+    if not _user_can_access_post(post_doc, payload.get('id')):
+        return jsonify({'result': 'fail', 'msg': 'Postingan ini berasal dari komunitas privat.'}), 403
+
     enriched = enrich_posts_metadata([post_doc], payload.get('id'))
     return jsonify({
         'result': 'success',
@@ -2201,7 +2344,7 @@ def post_detail_page(post_id):
         return render_template('404.html', username=post_id, current_user=user_info), 404
 
     post_doc = db.posts.find_one({'_id': ObjectId(post_id)})
-    if not post_doc:
+    if not post_doc or not _user_can_access_post(post_doc, current_username):
         return render_template('404.html', username=post_id, current_user=user_info), 404
 
     return render_template(
@@ -2250,7 +2393,9 @@ def repost_post(post_id=None):
         if not actual_post:
             return jsonify({'result': 'fail', 'msg': 'Original post not found'}), 404
 
-    # Cegah repost postingan milik sendiri
+    # Cegah repost postingan milik sendiri atau dari komunitas privat non-anggota
+    if not _user_can_access_post(actual_post, current_username):
+        return jsonify({'result': 'fail', 'msg': 'Anda tidak dapat mengakses postingan komunitas privat ini.'}), 403
     if actual_post.get('username') == current_username:
         return jsonify({'result': 'fail', 'msg': 'Cannot repost your own post'}), 400
 
@@ -2390,6 +2535,9 @@ def quote_post(post_id=None):
         actual_post = db.posts.find_one({'_id': ObjectId(actual_pid)})
         if not actual_post:
             return jsonify({'result': 'fail', 'msg': 'Original post not found'}), 404
+
+    if not _user_can_access_post(actual_post, current_username):
+        return jsonify({'result': 'fail', 'msg': 'Anda tidak dapat mengutip postingan dari komunitas privat.'}), 403
 
     # Ambil komentar kutipan dari JSON atau form-data
     content = None
@@ -2583,7 +2731,7 @@ def get_trending_posts():
         limit = 20
 
     now = datetime.now(timezone.utc)
-    match_query = {'post_type': {'$ne': 'repost'}}
+    match_query = {'post_type': {'$ne': 'repost'}, 'community_visibility': {'$ne': 'private'}}
 
     if period == 'today':
         cutoff = (now - timedelta(days=1)).isoformat()
@@ -2694,8 +2842,8 @@ def get_tag_posts_api(tag):
     except ValueError:
         limit = 20
 
-    query = {'hashtags': clean_tag, 'post_type': {'$ne': 'repost'}}
-    total_count = db.posts.count_documents({'hashtags': clean_tag, 'post_type': {'$ne': 'repost'}})
+    query = {'hashtags': clean_tag, 'post_type': {'$ne': 'repost'}, 'community_visibility': {'$ne': 'private'}}
+    total_count = db.posts.count_documents({'hashtags': clean_tag, 'post_type': {'$ne': 'repost'}, 'community_visibility': {'$ne': 'private'}})
 
     if sort_mode == 'latest':
         if cursor and ObjectId.is_valid(cursor):
@@ -2800,13 +2948,13 @@ def search_api():
                 'is_mine': (uname == current_username)
             })
 
-    # 2. Search Hashtags
+    # 2. Search Hashtags (tanpa membocorkan postingan komunitas private)
     if search_type in ['all', 'tags'] or q.startswith('#'):
         clean_tag_q = q.lstrip('#').lower().strip()
         if clean_tag_q:
             safe_tag_q = re.escape(clean_tag_q)
             pipeline = [
-                {'$match': {'hashtags': {'$regex': safe_tag_q, '$options': 'i'}, 'post_type': {'$ne': 'repost'}}},
+                {'$match': {'hashtags': {'$regex': safe_tag_q, '$options': 'i'}, 'post_type': {'$ne': 'repost'}, 'community_visibility': {'$ne': 'private'}}},
                 {'$unwind': '$hashtags'},
                 {'$match': {'hashtags': {'$regex': safe_tag_q, '$options': 'i'}}},
                 {'$group': {'_id': '$hashtags', 'post_count': {'$sum': 1}}},
@@ -2825,7 +2973,7 @@ def search_api():
 
     # 3. Search Posts
     if search_type in ['all', 'posts']:
-        post_query = {'comment': {'$regex': safe_q, '$options': 'i'}, 'post_type': {'$ne': 'repost'}}
+        post_query = {'comment': {'$regex': safe_q, '$options': 'i'}, 'post_type': {'$ne': 'repost'}, 'community_visibility': {'$ne': 'private'}}
         post_matches = list(db.posts.find(post_query).sort([('date', -1)]).limit(limit))
         results['posts'] = enrich_posts_metadata(post_matches, current_username)
 
@@ -3411,6 +3559,1200 @@ def publish_draft_api(draft_id):
         'post': created_post,
         'draft_id': draft_id,
     }), 201
+
+
+# ==========================================
+# COMMUNITY / CIRCLES SUBSYSTEM
+# ==========================================
+
+COMMUNITY_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$")
+RESERVED_COMMUNITY_SLUGS = {
+    "all", "discover", "joined", "created", "invited", "new", "create",
+    "edit", "delete", "api", "admin", "settings", "members", "requests",
+}
+
+
+def _normalize_community_slug(raw_val: str) -> str:
+    """Menormalisasi string menjadi candidate slug huruf kecil dengan tanda hubung."""
+    if not raw_val or not isinstance(raw_val, str):
+        return ""
+    s = raw_val.strip().lower()
+    s = re.sub(r"[\s_]+", "-", s)
+    s = re.sub(r"[^a-z0-9-]", "", s)
+    s = re.sub(r"-{2,}", "-", s).strip("-")
+    return s
+
+
+def _sync_community_member_count(community_id: str) -> int:
+    """Menghitung ulang dan menyinkronkan member_count di db.communities secara akurat."""
+    cid = str(community_id)
+    cnt = db.community_members.count_documents({"community_id": cid})
+    db.communities.update_one({"_id": ObjectId(cid)}, {"$set": {"member_count": cnt}})
+    return cnt
+
+
+def _resolve_community(identifier: str):
+    """Mencari komunitas berdasarkan slug (prioritas) atau ObjectId."""
+    if not identifier or not isinstance(identifier, str):
+        return None
+    clean = identifier.strip()
+    if not clean:
+        return None
+    doc = db.communities.find_one({"slug": clean.lower()})
+    if doc:
+        return doc
+    if ObjectId.is_valid(clean):
+        return db.communities.find_one({"_id": ObjectId(clean)})
+    return None
+
+
+def _serialize_community(doc: dict, current_username: str = None) -> dict:
+    """Menserialisasi dokumen komunitas lengkap dengan status keanggotaan pengguna aktif."""
+    cid = str(doc["_id"])
+    membership = _get_community_membership(cid, current_username) if current_username else None
+    is_member = bool(membership)
+    my_role = membership.get("role") if membership else None
+
+    my_request_status = "none"
+    if current_username and not is_member:
+        pending_inv = db.community_requests.find_one({
+            "community_id": cid,
+            "user_id": current_username,
+            "request_type": "invite",
+            "status": "pending",
+        })
+        if pending_inv:
+            my_request_status = "pending_invite"
+        else:
+            pending_req = db.community_requests.find_one({
+                "community_id": cid,
+                "user_id": current_username,
+                "request_type": "request",
+                "status": "pending",
+            })
+            if pending_req:
+                my_request_status = "pending_request"
+
+    return {
+        "_id": cid,
+        "name": doc.get("name", ""),
+        "slug": doc.get("slug", ""),
+        "description": doc.get("description", ""),
+        "visibility": doc.get("visibility", "public"),
+        "profile_image": doc.get("profile_image"),
+        "cover_image": doc.get("cover_image"),
+        "creator_id": doc.get("creator_id", ""),
+        "member_count": int(doc.get("member_count", 0)),
+        "created_at": doc.get("created_at", ""),
+        "updated_at": doc.get("updated_at", ""),
+        "is_member": is_member,
+        "my_role": my_role,
+        "can_manage": my_role in ("creator", "moderator"),
+        "my_request_status": my_request_status,
+    }
+
+
+def _recalc_or_get_community_response(doc: dict, current_username: str = None) -> dict:
+    """Helper ringan mengambil ulang doc komunitas terbaru dan menserialisasinya."""
+    fresh = db.communities.find_one({"_id": doc["_id"]}) or doc
+    return _serialize_community(fresh, current_username)
+
+
+@app.route('/communities', methods=['GET'])
+def communities_page():
+    """Halaman direktori & penemuan Community / Circles."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return redirect(url_for('login'))
+
+    current_username = payload.get('id')
+    user_info = db.users.find_one({'username': current_username}, {'_id': False})
+    if not user_info:
+        return redirect(url_for('login'))
+
+    return render_template('communities.html', user_info=user_info, current_user=user_info)
+
+
+@app.route('/communities/<slug>', methods=['GET'])
+@app.route('/c/<slug>', methods=['GET'])
+def community_detail_page(slug):
+    """Halaman detail sebuah Community / Circle beserta feed, anggota, dan manajemen."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return redirect(url_for('login'))
+
+    current_username = payload.get('id')
+    user_info = db.users.find_one({'username': current_username}, {'_id': False})
+    if not user_info:
+        return redirect(url_for('login'))
+
+    comm_doc = _resolve_community(slug)
+    if not comm_doc:
+        return render_template('404.html', username=slug, current_user=user_info), 404
+
+    return render_template(
+        'community_detail.html',
+        user_info=user_info,
+        current_user=user_info,
+        community=_serialize_community(comm_doc, current_username),
+    )
+
+
+@app.route('/api/communities', methods=['GET'])
+def list_communities_api():
+    """
+    Mengambil daftar komunitas dengan filter tab ('all', 'discover', 'joined', 'created', 'invited'),
+    pencarian query 'q', serta pagination cursor & limit.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    tab = request.args.get('tab', 'all').lower().strip()
+    q = request.args.get('q', '').strip()
+    cursor = request.args.get('cursor', '').strip()
+    limit_raw = request.args.get('limit', '20').strip()
+
+    try:
+        limit = max(1, min(int(limit_raw), 50))
+    except ValueError:
+        return jsonify({'result': 'fail', 'msg': 'Invalid limit parameter'}), 400
+
+    joined_ids = _get_user_joined_community_ids(current_username)
+    joined_oids = [ObjectId(cid) for cid in joined_ids if ObjectId.is_valid(cid)]
+
+    if tab == 'joined':
+        if not joined_oids:
+            return jsonify({'result': 'success', 'communities': [], 'has_more': False, 'next_cursor': None}), 200
+        base_filter = {'_id': {'$in': joined_oids}}
+    elif tab == 'created':
+        base_filter = {'creator_id': current_username}
+    elif tab == 'invited':
+        req_docs = list(db.community_requests.find({
+            'user_id': current_username,
+            'status': 'pending',
+        }))
+        req_oids = [ObjectId(r['community_id']) for r in req_docs if ObjectId.is_valid(r.get('community_id', ''))]
+        if not req_oids:
+            return jsonify({'result': 'success', 'communities': [], 'has_more': False, 'next_cursor': None}), 200
+        base_filter = {'_id': {'$in': req_oids}}
+    elif tab == 'discover':
+        base_filter = {'visibility': 'public'}
+        if joined_oids:
+            base_filter = {'visibility': 'public', '_id': {'$nin': joined_oids}}
+    else:
+        # 'all': jika user mengetik pencarian, tampilkan public maupun private metadata agar dapat mengajukan permintaan bergabung;
+        # tanpa pencarian, tampilkan komunitas public + komunitas privat yang diikuti user
+        if q:
+            base_filter = {}
+        elif joined_oids:
+            base_filter = {'$or': [{'visibility': 'public'}, {'_id': {'$in': joined_oids}}]}
+        else:
+            base_filter = {'visibility': 'public'}
+
+    query_parts = [base_filter] if base_filter else []
+    if q:
+        safe_q = re.escape(q[:60])
+        query_parts.append({
+            '$or': [
+                {'name': {'$regex': safe_q, '$options': 'i'}},
+                {'slug': {'$regex': safe_q, '$options': 'i'}},
+                {'description': {'$regex': safe_q, '$options': 'i'}},
+            ]
+        })
+
+    if cursor:
+        if not ObjectId.is_valid(cursor):
+            return jsonify({'result': 'fail', 'msg': 'Invalid cursor parameter'}), 400
+        anchor = db.communities.find_one({'_id': ObjectId(cursor)})
+        if not anchor:
+            return jsonify({'result': 'fail', 'msg': 'Cursor not found'}), 404
+        anchor_ts = anchor.get('created_at', '')
+        query_parts.append({
+            '$or': [
+                {'created_at': {'$lt': anchor_ts}},
+                {'created_at': anchor_ts, '_id': {'$lt': anchor['_id']}},
+            ]
+        })
+
+    final_query = {'$and': query_parts} if len(query_parts) > 1 else (query_parts[0] if query_parts else {})
+    docs = list(db.communities.find(final_query).sort([('created_at', -1), ('_id', -1)]).limit(limit + 1))
+    has_more = len(docs) > limit
+    docs = docs[:limit]
+    next_cursor = str(docs[-1]['_id']) if has_more else None
+
+    return jsonify({
+        'result': 'success',
+        'communities': [_serialize_community(d, current_username) for d in docs],
+        'has_more': has_more,
+        'next_cursor': next_cursor,
+    }), 200
+
+
+@app.route('/api/communities', methods=['POST'])
+def create_community_api():
+    """Membuat Community / Circle baru beserta foto profil & sampul opsional."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    user_info = db.users.find_one({'username': current_username})
+    if not user_info:
+        return jsonify({'result': 'fail', 'msg': 'User profile not found'}), 404
+
+    json_body = request.get_json(silent=True) if request.is_json else None
+    if json_body is not None:
+        raw_name = json_body.get('name', '')
+        raw_slug = json_body.get('slug', '')
+        raw_desc = json_body.get('description', '')
+        raw_vis = json_body.get('visibility', 'public')
+    else:
+        raw_name = request.form.get('name', '')
+        raw_slug = request.form.get('slug', '')
+        raw_desc = request.form.get('description', '')
+        raw_vis = request.form.get('visibility', 'public')
+
+    if not isinstance(raw_name, str) or not raw_name.strip():
+        return jsonify({'result': 'fail', 'msg': 'Nama komunitas wajib diisi.'}), 400
+    name = raw_name.strip()
+    if len(name) < 3 or len(name) > 60:
+        return jsonify({'result': 'fail', 'msg': 'Nama komunitas harus terdiri dari 3 hingga 60 karakter.'}), 400
+
+    slug_input = raw_slug if (isinstance(raw_slug, str) and raw_slug.strip()) else name
+    slug = _normalize_community_slug(slug_input)
+    if not slug or not COMMUNITY_SLUG_RE.match(slug):
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Slug komunitas harus 3–40 karakter huruf kecil, angka, atau tanda hubung (-).'
+        }), 400
+    if slug in RESERVED_COMMUNITY_SLUGS:
+        return jsonify({'result': 'fail', 'msg': 'Slug tersebut tidak tersedia karena dicadangkan sistem.'}), 400
+
+    if raw_desc is None:
+        description = ''
+    elif isinstance(raw_desc, str):
+        description = raw_desc.strip()
+    else:
+        return jsonify({'result': 'fail', 'msg': 'Format deskripsi tidak valid.'}), 400
+    if len(description) > 500:
+        return jsonify({'result': 'fail', 'msg': 'Deskripsi komunitas maksimal 500 karakter.'}), 400
+
+    visibility = str(raw_vis or 'public').strip().lower()
+    if visibility not in ('public', 'private'):
+        return jsonify({'result': 'fail', 'msg': 'Visibilitas komunitas harus "public" atau "private".'}), 400
+
+    # Cek duplikasi slug sebelum upload gambar
+    if db.communities.find_one({'slug': slug}):
+        return jsonify({'result': 'fail', 'msg': f'Identifier "/c/{slug}" sudah digunakan komunitas lain.'}), 409
+
+    # Validasi optional profile_image & cover_image menggunakan validator gambar existing
+    avatar_file = request.files.get('profile_image') or request.files.get('avatar')
+    cover_file = request.files.get('cover_image') or request.files.get('cover')
+
+    validated_avatar = None
+    validated_cover = None
+    try:
+        if avatar_file and (avatar_file.filename or '').strip():
+            validated_avatar = validate_post_image_file(avatar_file)
+        if cover_file and (cover_file.filename or '').strip():
+            validated_cover = validate_post_image_file(cover_file)
+    except ValueError as err:
+        return jsonify({'result': 'fail', 'msg': str(err)}), 400
+
+    saved_avatar = None
+    saved_cover = None
+    try:
+        if validated_avatar:
+            saved_avatar = save_community_image_file(*validated_avatar[:3])
+        if validated_cover:
+            saved_cover = save_community_image_file(*validated_cover[:3])
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        doc = {
+            'name': name,
+            'slug': slug,
+            'description': description,
+            'visibility': visibility,
+            'profile_image': saved_avatar,
+            'cover_image': saved_cover,
+            'creator_id': current_username,
+            'member_count': 1,
+            'created_at': now_iso,
+            'updated_at': now_iso,
+        }
+
+        try:
+            res = db.communities.insert_one(doc)
+        except DuplicateKeyError:
+            if saved_avatar:
+                safe_delete_community_image(saved_avatar['filename'], check_db_refs=False)
+            if saved_cover:
+                safe_delete_community_image(saved_cover['filename'], check_db_refs=False)
+            return jsonify({'result': 'fail', 'msg': f'Identifier "/c/{slug}" sudah digunakan komunitas lain.'}), 409
+
+        cid = str(res.inserted_id)
+        doc['_id'] = res.inserted_id
+
+        # Daftarkan creator sebagai anggota dengan role 'creator'
+        db.community_members.insert_one({
+            'community_id': cid,
+            'user_id': current_username,
+            'role': 'creator',
+            'joined_at': now_iso,
+        })
+
+        return jsonify({
+            'result': 'success',
+            'msg': 'Komunitas berhasil dibuat.',
+            'community': _serialize_community(doc, current_username),
+        }), 201
+    except Exception as exc:
+        if saved_avatar:
+            safe_delete_community_image(saved_avatar['filename'], check_db_refs=False)
+        if saved_cover:
+            safe_delete_community_image(saved_cover['filename'], check_db_refs=False)
+        return jsonify({'result': 'fail', 'msg': f'Gagal membuat komunitas: {exc}'}), 500
+
+
+@app.route('/api/communities/<identifier>', methods=['GET'])
+def get_community_api(identifier):
+    """Mengambil detail metadata satu komunitas berdasarkan slug atau ID."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    return jsonify({
+        'result': 'success',
+        'community': _serialize_community(comm_doc, payload.get('id')),
+    }), 200
+
+
+@app.route('/api/communities/<identifier>/update', methods=['PUT', 'POST'])
+def update_community_api(identifier):
+    """Memperbarui metadata & gambar komunitas (khusus creator atau moderator)."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    cid = str(comm_doc['_id'])
+    membership = _get_community_membership(cid, current_username)
+    if not membership or membership.get('role') not in ('creator', 'moderator'):
+        return jsonify({'result': 'fail', 'msg': 'Anda tidak memiliki izin mengelola komunitas ini.'}), 403
+
+    json_body = request.get_json(silent=True) if request.is_json else None
+    src = json_body if json_body is not None else request.form
+
+    updates = {}
+    if 'name' in src and src.get('name') is not None:
+        new_name = str(src.get('name')).strip()
+        if len(new_name) < 3 or len(new_name) > 60:
+            return jsonify({'result': 'fail', 'msg': 'Nama komunitas harus 3–60 karakter.'}), 400
+        updates['name'] = new_name
+
+    if 'description' in src and src.get('description') is not None:
+        new_desc = str(src.get('description')).strip()
+        if len(new_desc) > 500:
+            return jsonify({'result': 'fail', 'msg': 'Deskripsi maksimal 500 karakter.'}), 400
+        updates['description'] = new_desc
+
+    if 'visibility' in src and src.get('visibility') is not None:
+        new_vis = str(src.get('visibility')).strip().lower()
+        if new_vis not in ('public', 'private'):
+            return jsonify({'result': 'fail', 'msg': 'Visibilitas harus "public" atau "private".'}), 400
+        updates['visibility'] = new_vis
+
+    avatar_file = request.files.get('profile_image') or request.files.get('avatar')
+    cover_file = request.files.get('cover_image') or request.files.get('cover')
+    validated_avatar = None
+    validated_cover = None
+    try:
+        if avatar_file and (avatar_file.filename or '').strip():
+            validated_avatar = validate_post_image_file(avatar_file)
+        if cover_file and (cover_file.filename or '').strip():
+            validated_cover = validate_post_image_file(cover_file)
+    except ValueError as err:
+        return jsonify({'result': 'fail', 'msg': str(err)}), 400
+
+    old_avatar_fname = (comm_doc.get('profile_image') or {}).get('filename') if isinstance(comm_doc.get('profile_image'), dict) else None
+    old_cover_fname = (comm_doc.get('cover_image') or {}).get('filename') if isinstance(comm_doc.get('cover_image'), dict) else None
+    saved_avatar = None
+    saved_cover = None
+
+    try:
+        if validated_avatar:
+            saved_avatar = save_community_image_file(*validated_avatar[:3])
+            updates['profile_image'] = saved_avatar
+        if validated_cover:
+            saved_cover = save_community_image_file(*validated_cover[:3])
+            updates['cover_image'] = saved_cover
+
+        if updates:
+            updates['updated_at'] = datetime.now(timezone.utc).isoformat()
+            db.communities.update_one({'_id': comm_doc['_id']}, {'$set': updates})
+
+            # Sinkronkan visibilitas/nama pada postingan komunitas jika berubah
+            post_sync = {}
+            if 'visibility' in updates:
+                post_sync['community_visibility'] = updates['visibility']
+            if 'name' in updates:
+                post_sync['community_name'] = updates['name']
+            if post_sync:
+                db.posts.update_many({'community_id': cid}, {'$set': post_sync})
+    except Exception as exc:
+        if saved_avatar:
+            safe_delete_community_image(saved_avatar['filename'], check_db_refs=False)
+        if saved_cover:
+            safe_delete_community_image(saved_cover['filename'], check_db_refs=False)
+        return jsonify({'result': 'fail', 'msg': f'Gagal memperbarui komunitas: {exc}'}), 500
+
+    if saved_avatar and old_avatar_fname and old_avatar_fname != saved_avatar['filename']:
+        safe_delete_community_image(old_avatar_fname, check_db_refs=True)
+    if saved_cover and old_cover_fname and old_cover_fname != saved_cover['filename']:
+        safe_delete_community_image(old_cover_fname, check_db_refs=True)
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Komunitas berhasil diperbarui.',
+        'community': _recalc_or_get_community_response(comm_doc, current_username),
+    }), 200
+
+
+@app.route('/api/communities/<identifier>', methods=['DELETE'])
+@app.route('/api/communities/<identifier>/delete', methods=['POST'])
+def delete_community_api(identifier):
+    """Menghapus komunitas beserta seluruh keanggotaan, permintaan, dan postingannya (khusus creator)."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    if comm_doc.get('creator_id') != current_username:
+        return jsonify({'result': 'fail', 'msg': 'Hanya pembuat komunitas yang dapat menghapus komunitas ini.'}), 403
+
+    cid = str(comm_doc['_id'])
+    comm_posts = list(db.posts.find({'community_id': cid}))
+
+    db.communities.delete_one({'_id': comm_doc['_id']})
+    db.community_members.delete_many({'community_id': cid})
+    db.community_requests.delete_many({'community_id': cid})
+    db.posts.delete_many({'community_id': cid})
+
+    for p in comm_posts:
+        pid_str = str(p['_id'])
+        db.bookmarks.delete_many({'post_id': pid_str})
+        db.likes.delete_many({'post_id': pid_str})
+        db.stars.delete_many({'post_id': pid_str})
+        db.thumbs.delete_many({'post_id': pid_str})
+        db.comments.delete_many({'post_id': pid_str})
+        cleanup_notifications_for_post(pid_str)
+        if p.get('post_type') != 'repost':
+            for img in (p.get('images') or []):
+                if isinstance(img, dict) and img.get('filename'):
+                    safe_delete_post_image(img['filename'], check_db_refs=True)
+
+    for key in ('profile_image', 'cover_image'):
+        img_obj = comm_doc.get(key)
+        if isinstance(img_obj, dict) and img_obj.get('filename'):
+            safe_delete_community_image(img_obj['filename'], check_db_refs=True)
+
+    return jsonify({'result': 'success', 'msg': 'Komunitas berhasil dihapus.'}), 200
+
+
+@app.route('/api/communities/<identifier>/join', methods=['POST'])
+def join_community_api(identifier):
+    """
+    Bergabung ke komunitas:
+    - Public community: langsung menjadi member.
+    - Private community: berhasil jika memiliki undangan tertunda; jika tidak ada undangan -> 403.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    cid = str(comm_doc['_id'])
+    if _is_community_member(cid, current_username):
+        return jsonify({'result': 'fail', 'msg': 'Anda sudah menjadi anggota komunitas ini.'}), 409
+
+    visibility = comm_doc.get('visibility', 'public')
+    pending_invite = db.community_requests.find_one({
+        'community_id': cid,
+        'user_id': current_username,
+        'request_type': 'invite',
+        'status': 'pending',
+    })
+
+    if visibility == 'private' and not pending_invite:
+        return jsonify({
+            'result': 'fail',
+            'code': 'PRIVATE_COMMUNITY',
+            'msg': 'Komunitas ini bersifat privat. Ajukan permintaan bergabung atau tunggu undangan pengelola.'
+        }), 403
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        db.community_members.insert_one({
+            'community_id': cid,
+            'user_id': current_username,
+            'role': 'member',
+            'joined_at': now_iso,
+        })
+    except DuplicateKeyError:
+        return jsonify({'result': 'fail', 'msg': 'Anda sudah menjadi anggota komunitas ini.'}), 409
+
+    if pending_invite:
+        db.community_requests.update_one(
+            {'_id': pending_invite['_id']},
+            {'$set': {'status': 'approved', 'updated_at': now_iso}}
+        )
+    # Bersihkan permintaan pending lain jika ada
+    db.community_requests.delete_many({
+        'community_id': cid,
+        'user_id': current_username,
+        'status': 'pending',
+    })
+
+    _sync_community_member_count(cid)
+    return jsonify({
+        'result': 'success',
+        'msg': 'Berhasil bergabung ke komunitas.',
+        'community': _recalc_or_get_community_response(comm_doc, current_username),
+    }), 200
+
+
+@app.route('/api/communities/<identifier>/leave', methods=['POST'])
+def leave_community_api(identifier):
+    """Keluar dari suatu komunitas. Creator tunggal tidak dapat meninggalkan komunitas tanpa menghapusnya."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    cid = str(comm_doc['_id'])
+    membership = _get_community_membership(cid, current_username)
+    if not membership:
+        return jsonify({'result': 'fail', 'msg': 'Anda bukan anggota komunitas ini.'}), 400
+
+    if membership.get('role') == 'creator':
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Pembuat komunitas tidak dapat keluar secara langsung. Hapus komunitas jika ingin menutupnya.'
+        }), 400
+
+    db.community_members.delete_one({'community_id': cid, 'user_id': current_username})
+    _sync_community_member_count(cid)
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Berhasil keluar dari komunitas.',
+        'community': _recalc_or_get_community_response(comm_doc, current_username),
+    }), 200
+
+
+@app.route('/api/communities/<identifier>/request', methods=['POST'])
+def request_join_community_api(identifier):
+    """Mengajukan permintaan bergabung ke komunitas privat."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    cid = str(comm_doc['_id'])
+    if _is_community_member(cid, current_username):
+        return jsonify({'result': 'fail', 'msg': 'Anda sudah menjadi anggota komunitas ini.'}), 409
+
+    if comm_doc.get('visibility') == 'public':
+        return jsonify({'result': 'fail', 'msg': 'Komunitas publik dapat langsung diikuti tanpa persetujuan.'}), 400
+
+    # Jika user sebenarnya sudah punya undangan pending, langsung terima
+    pending_invite = db.community_requests.find_one({
+        'community_id': cid,
+        'user_id': current_username,
+        'request_type': 'invite',
+        'status': 'pending',
+    })
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if pending_invite:
+        db.community_members.insert_one({
+            'community_id': cid,
+            'user_id': current_username,
+            'role': 'member',
+            'joined_at': now_iso,
+        })
+        db.community_requests.update_one(
+            {'_id': pending_invite['_id']},
+            {'$set': {'status': 'approved', 'updated_at': now_iso}}
+        )
+        _sync_community_member_count(cid)
+        return jsonify({
+            'result': 'success',
+            'msg': 'Undangan tersedia — Anda langsung bergabung ke komunitas.',
+            'community': _recalc_or_get_community_response(comm_doc, current_username),
+        }), 200
+
+    existing_req = db.community_requests.find_one({
+        'community_id': cid,
+        'user_id': current_username,
+        'request_type': 'request',
+        'status': 'pending',
+    })
+    if existing_req:
+        return jsonify({'result': 'fail', 'msg': 'Permintaan bergabung Anda masih menunggu persetujuan.'}), 409
+
+    db.community_requests.insert_one({
+        'community_id': cid,
+        'user_id': current_username,
+        'request_type': 'request',
+        'status': 'pending',
+        'invited_by': None,
+        'created_at': now_iso,
+        'updated_at': now_iso,
+    })
+
+    create_notification(
+        recipient=comm_doc.get('creator_id'),
+        actor=current_username,
+        notif_type='community_join_request',
+        message=f"meminta bergabung ke komunitas {comm_doc.get('name', '')}."
+    )
+
+    return jsonify({
+        'result': 'success',
+        'msg': 'Permintaan bergabung berhasil dikirim.',
+        'community': _recalc_or_get_community_response(comm_doc, current_username),
+    }), 201
+
+
+@app.route('/api/communities/<identifier>/request/cancel', methods=['POST'])
+def cancel_join_request_api(identifier):
+    """Membatalkan permintaan bergabung yang masih pending."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    cid = str(comm_doc['_id'])
+    db.community_requests.delete_many({
+        'community_id': cid,
+        'user_id': current_username,
+        'request_type': 'request',
+        'status': 'pending',
+    })
+    return jsonify({
+        'result': 'success',
+        'msg': 'Permintaan bergabung dibatalkan.',
+        'community': _recalc_or_get_community_response(comm_doc, current_username),
+    }), 200
+
+
+@app.route('/api/communities/<identifier>/invite', methods=['POST'])
+def invite_to_community_api(identifier):
+    """Mengundang pengguna ke komunitas (khusus creator/moderator)."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    cid = str(comm_doc['_id'])
+    membership = _get_community_membership(cid, current_username)
+    if not membership or membership.get('role') not in ('creator', 'moderator'):
+        return jsonify({'result': 'fail', 'msg': 'Hanya pengelola komunitas yang dapat mengirim undangan.'}), 403
+
+    json_body = request.get_json(silent=True) if request.is_json else None
+    target_username = (json_body.get('username') if json_body else request.form.get('username', '') or '').strip().lstrip('@')
+    if not target_username:
+        return jsonify({'result': 'fail', 'msg': 'Username target wajib diisi.'}), 400
+
+    target_user = db.users.find_one({'username': target_username})
+    if not target_user:
+        return jsonify({'result': 'fail', 'msg': 'Pengguna tidak ditemukan.'}), 404
+
+    if _is_community_member(cid, target_username):
+        return jsonify({'result': 'fail', 'msg': f'@{target_username} sudah menjadi anggota komunitas ini.'}), 409
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    # Jika target sudah mengirim request pending, langsung setujui saat pengelola mengundangnya
+    pending_req = db.community_requests.find_one({
+        'community_id': cid,
+        'user_id': target_username,
+        'request_type': 'request',
+        'status': 'pending',
+    })
+    if pending_req:
+        db.community_members.insert_one({
+            'community_id': cid,
+            'user_id': target_username,
+            'role': 'member',
+            'joined_at': now_iso,
+        })
+        db.community_requests.update_one(
+            {'_id': pending_req['_id']},
+            {'$set': {'status': 'approved', 'updated_at': now_iso}}
+        )
+        _sync_community_member_count(cid)
+        create_notification(
+            recipient=target_username,
+            actor=current_username,
+            notif_type='community_request_approved',
+            message=f"menyetujui permintaan Anda bergabung ke {comm_doc.get('name', '')}."
+        )
+        return jsonify({'result': 'success', 'msg': f'Permintaan @{target_username} langsung disetujui dan ditambahkan.'}), 200
+
+    existing_invite = db.community_requests.find_one({
+        'community_id': cid,
+        'user_id': target_username,
+        'request_type': 'invite',
+        'status': 'pending',
+    })
+    if existing_invite:
+        return jsonify({'result': 'fail', 'msg': f'Undangan untuk @{target_username} sudah dikirim sebelumnya.'}), 409
+
+    db.community_requests.insert_one({
+        'community_id': cid,
+        'user_id': target_username,
+        'request_type': 'invite',
+        'status': 'pending',
+        'invited_by': current_username,
+        'created_at': now_iso,
+        'updated_at': now_iso,
+    })
+
+    create_notification(
+        recipient=target_username,
+        actor=current_username,
+        notif_type='community_invite',
+        message=f"mengundang Anda bergabung ke komunitas {comm_doc.get('name', '')}."
+    )
+    return jsonify({'result': 'success', 'msg': f'Undangan berhasil dikirim ke @{target_username}.'}), 201
+
+
+@app.route('/api/communities/<identifier>/invite/accept', methods=['POST'])
+def accept_community_invite_api(identifier):
+    """Menerima undangan bergabung ke komunitas."""
+    return join_community_api(identifier)
+
+
+@app.route('/api/communities/<identifier>/invite/decline', methods=['POST'])
+def decline_community_invite_api(identifier):
+    """Menolak undangan bergabung ke komunitas."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    cid = str(comm_doc['_id'])
+    inv = db.community_requests.find_one({
+        'community_id': cid,
+        'user_id': current_username,
+        'request_type': 'invite',
+        'status': 'pending',
+    })
+    if not inv:
+        return jsonify({'result': 'fail', 'msg': 'Undangan tidak ditemukan.'}), 404
+
+    db.community_requests.update_one(
+        {'_id': inv['_id']},
+        {'$set': {'status': 'rejected', 'updated_at': datetime.now(timezone.utc).isoformat()}}
+    )
+    return jsonify({
+        'result': 'success',
+        'msg': 'Undangan ditolak.',
+        'community': _recalc_or_get_community_response(comm_doc, current_username),
+    }), 200
+
+
+@app.route('/api/communities/<identifier>/requests', methods=['GET'])
+def list_community_requests_api(identifier):
+    """Melihat daftar permintaan bergabung & undangan tertunda (khusus creator/moderator)."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    cid = str(comm_doc['_id'])
+    membership = _get_community_membership(cid, current_username)
+    if not membership or membership.get('role') not in ('creator', 'moderator'):
+        return jsonify({'result': 'fail', 'msg': 'Anda tidak memiliki izin melihat permintaan keanggotaan.'}), 403
+
+    pending_docs = list(db.community_requests.find({
+        'community_id': cid,
+        'status': 'pending',
+    }).sort([('created_at', -1)]))
+
+    usernames = list({r['user_id'] for r in pending_docs if r.get('user_id')})
+    users_map = {}
+    if usernames:
+        for u in db.users.find({'username': {'$in': usernames}}, {'password': 0}):
+            users_map[u['username']] = u
+
+    enriched = []
+    for r in pending_docs:
+        u = users_map.get(r['user_id'], {})
+        enriched.append({
+            '_id': str(r['_id']),
+            'user_id': r['user_id'],
+            'profile_name': u.get('profile_name', r['user_id']),
+            'profile_pic_real': u.get('profile_pic_real', 'profile_pics/profile_placeholder.png'),
+            'request_type': r.get('request_type', 'request'),
+            'invited_by': r.get('invited_by'),
+            'created_at': r.get('created_at', ''),
+        })
+
+    return jsonify({'result': 'success', 'requests': enriched}), 200
+
+
+@app.route('/api/communities/<identifier>/requests/<target_username>/approve', methods=['POST'])
+def approve_community_request_api(identifier, target_username):
+    """Menyetujui permintaan bergabung user ke komunitas privat (khusus creator/moderator)."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    cid = str(comm_doc['_id'])
+    membership = _get_community_membership(cid, current_username)
+    if not membership or membership.get('role') not in ('creator', 'moderator'):
+        return jsonify({'result': 'fail', 'msg': 'Anda tidak memiliki izin menyetujui permintaan.'}), 403
+
+    req_doc = db.community_requests.find_one({
+        'community_id': cid,
+        'user_id': target_username,
+        'request_type': 'request',
+        'status': 'pending',
+    })
+    if not req_doc:
+        return jsonify({'result': 'fail', 'msg': 'Permintaan bergabung tidak ditemukan.'}), 404
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if not _is_community_member(cid, target_username):
+        db.community_members.insert_one({
+            'community_id': cid,
+            'user_id': target_username,
+            'role': 'member',
+            'joined_at': now_iso,
+        })
+    db.community_requests.update_one(
+        {'_id': req_doc['_id']},
+        {'$set': {'status': 'approved', 'updated_at': now_iso}}
+    )
+    _sync_community_member_count(cid)
+
+    create_notification(
+        recipient=target_username,
+        actor=current_username,
+        notif_type='community_request_approved',
+        message=f"menyetujui permintaan bergabung Anda ke {comm_doc.get('name', '')}."
+    )
+
+    return jsonify({
+        'result': 'success',
+        'msg': f'@{target_username} disetujui menjadi anggota.',
+        'community': _recalc_or_get_community_response(comm_doc, current_username),
+    }), 200
+
+
+@app.route('/api/communities/<identifier>/requests/<target_username>/reject', methods=['POST'])
+def reject_community_request_api(identifier, target_username):
+    """Menolak permintaan bergabung user ke komunitas privat (khusus creator/moderator)."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    cid = str(comm_doc['_id'])
+    membership = _get_community_membership(cid, current_username)
+    if not membership or membership.get('role') not in ('creator', 'moderator'):
+        return jsonify({'result': 'fail', 'msg': 'Anda tidak memiliki izin menolak permintaan.'}), 403
+
+    req_doc = db.community_requests.find_one({
+        'community_id': cid,
+        'user_id': target_username,
+        'status': 'pending',
+    })
+    if not req_doc:
+        return jsonify({'result': 'fail', 'msg': 'Permintaan atau undangan tidak ditemukan.'}), 404
+
+    db.community_requests.update_one(
+        {'_id': req_doc['_id']},
+        {'$set': {'status': 'rejected', 'updated_at': datetime.now(timezone.utc).isoformat()}}
+    )
+    return jsonify({'result': 'success', 'msg': f'Permintaan @{target_username} ditolak.'}), 200
+
+
+@app.route('/api/communities/<identifier>/members', methods=['GET'])
+def list_community_members_api(identifier):
+    """Mengambil daftar anggota komunitas (komunitas privat hanya dapat dilihat oleh anggotanya)."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    cid = str(comm_doc['_id'])
+    if comm_doc.get('visibility') == 'private' and not _is_community_member(cid, current_username):
+        return jsonify({'result': 'fail', 'msg': 'Daftar anggota komunitas privat hanya dapat dilihat oleh anggota.'}), 403
+
+    memberships = list(db.community_members.find({'community_id': cid}).sort([('joined_at', 1)]))
+    usernames = [m['user_id'] for m in memberships if m.get('user_id')]
+    users_map = {}
+    if usernames:
+        for u in db.users.find({'username': {'$in': usernames}}, {'password': 0}):
+            users_map[u['username']] = u
+
+    members = []
+    for m in memberships:
+        uname = m['user_id']
+        u = users_map.get(uname, {})
+        members.append({
+            'username': uname,
+            'profile_name': u.get('profile_name', uname),
+            'profile_pic_real': u.get('profile_pic_real', 'profile_pics/profile_placeholder.png'),
+            'profile_info': u.get('profile_info', ''),
+            'role': m.get('role', 'member'),
+            'joined_at': m.get('joined_at', ''),
+        })
+
+    return jsonify({'result': 'success', 'members': members, 'total': len(members)}), 200
+
+
+@app.route('/api/communities/<identifier>/members/<target_username>/remove', methods=['POST'])
+def remove_community_member_api(identifier, target_username):
+    """Mengeluarkan anggota dari komunitas (khusus creator/moderator; creator tidak bisa dikeluarkan)."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    cid = str(comm_doc['_id'])
+    actor_m = _get_community_membership(cid, current_username)
+    if not actor_m or actor_m.get('role') not in ('creator', 'moderator'):
+        return jsonify({'result': 'fail', 'msg': 'Anda tidak memiliki izin mengeluarkan anggota.'}), 403
+
+    target_m = _get_community_membership(cid, target_username)
+    if not target_m:
+        return jsonify({'result': 'fail', 'msg': 'Anggota tidak ditemukan.'}), 404
+
+    if target_m.get('role') == 'creator':
+        return jsonify({'result': 'fail', 'msg': 'Pembuat komunitas tidak dapat dikeluarkan.'}), 400
+    if actor_m.get('role') == 'moderator' and target_m.get('role') == 'moderator':
+        return jsonify({'result': 'fail', 'msg': 'Hanya pembuat komunitas yang dapat mengeluarkan moderator.'}), 403
+
+    db.community_members.delete_one({'community_id': cid, 'user_id': target_username})
+    _sync_community_member_count(cid)
+    return jsonify({
+        'result': 'success',
+        'msg': f'@{target_username} telah dikeluarkan dari komunitas.',
+        'community': _recalc_or_get_community_response(comm_doc, current_username),
+    }), 200
+
+
+@app.route('/api/communities/<identifier>/members/<target_username>/role', methods=['POST'])
+def update_community_member_role_api(identifier, target_username):
+    """Mengubah peran anggota menjadi 'moderator' atau 'member' (khusus creator)."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    if comm_doc.get('creator_id') != current_username:
+        return jsonify({'result': 'fail', 'msg': 'Hanya pembuat komunitas yang dapat mengubah peran anggota.'}), 403
+
+    json_body = request.get_json(silent=True) if request.is_json else None
+    new_role = ((json_body.get('role') if json_body else request.form.get('role', '')) or '').strip().lower()
+    if new_role not in ('member', 'moderator'):
+        return jsonify({'result': 'fail', 'msg': 'Peran harus "member" atau "moderator".'}), 400
+
+    cid = str(comm_doc['_id'])
+    target_m = _get_community_membership(cid, target_username)
+    if not target_m:
+        return jsonify({'result': 'fail', 'msg': 'Anggota tidak ditemukan.'}), 404
+    if target_m.get('role') == 'creator':
+        return jsonify({'result': 'fail', 'msg': 'Peran pembuat komunitas tidak dapat diturunkan.'}), 400
+
+    db.community_members.update_one(
+        {'community_id': cid, 'user_id': target_username},
+        {'$set': {'role': new_role}}
+    )
+    return jsonify({'result': 'success', 'msg': f'Peran @{target_username} diperbarui menjadi {new_role}.'}), 200
+
+
+@app.route('/api/communities/<identifier>/posts', methods=['GET', 'POST'])
+def community_posts_api(identifier):
+    """Mengambil atau membuat postingan di dalam sebuah Community / Circle."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    comm_doc = _resolve_community(identifier)
+    if not comm_doc:
+        return jsonify({'result': 'fail', 'msg': 'Komunitas tidak ditemukan.'}), 404
+
+    cid = str(comm_doc['_id'])
+    is_member = _is_community_member(cid, current_username)
+
+    if request.method == 'GET':
+        if comm_doc.get('visibility') == 'private' and not is_member:
+            return jsonify({'result': 'fail', 'msg': 'Postingan komunitas privat hanya dapat dilihat oleh anggotanya.'}), 403
+
+        cursor = request.args.get('cursor', '').strip()
+        limit_raw = request.args.get('limit', '20').strip()
+        try:
+            limit = max(1, min(int(limit_raw), 50))
+        except ValueError:
+            return jsonify({'result': 'fail', 'msg': 'Invalid limit parameter'}), 400
+
+        query = {'community_id': cid}
+        if cursor:
+            if not ObjectId.is_valid(cursor):
+                return jsonify({'result': 'fail', 'msg': 'Invalid cursor parameter'}), 400
+            anchor = db.posts.find_one({'_id': ObjectId(cursor), 'community_id': cid})
+            if not anchor:
+                return jsonify({'result': 'fail', 'msg': 'Cursor not found'}), 404
+            query = {
+                '$and': [
+                    {'community_id': cid},
+                    {'$or': [
+                        {'date': {'$lt': anchor.get('date', '')}},
+                        {'date': anchor.get('date', ''), '_id': {'$lt': anchor['_id']}},
+                    ]}
+                ]
+            }
+
+        docs = list(db.posts.find(query).sort([('date', -1), ('_id', -1)]).limit(limit + 1))
+        has_more = len(docs) > limit
+        docs = docs[:limit]
+        posts = enrich_posts_metadata(docs, current_username)
+        next_cursor = str(posts[-1]['_id']) if has_more else None
+        return jsonify({
+            'result': 'success',
+            'posts': posts,
+            'has_more': has_more,
+            'next_cursor': next_cursor,
+        }), 200
+
+    # POST: membuat postingan ke dalam komunitas (wajib member)
+    if not is_member:
+        return jsonify({'result': 'fail', 'msg': 'Anda harus bergabung dengan komunitas ini untuk membuat postingan.'}), 403
+
+    user_info = db.users.find_one({'username': current_username})
+    if not user_info:
+        return jsonify({'result': 'fail', 'msg': 'User profile not found'}), 404
+
+    json_body = request.get_json(silent=True) if request.is_json else None
+    if json_body is not None:
+        comment_receive = (json_body.get('comment') or json_body.get('comment_give') or '').strip()
+        date_receive = json_body.get('date_give') or datetime.now(timezone.utc).isoformat()
+    else:
+        comment_receive = (request.form.get('comment_give') or request.form.get('comment') or '').strip()
+        date_receive = request.form.get('date_give') or datetime.now(timezone.utc).isoformat()
+
+    raw_files = []
+    for key in ('images', 'images[]', 'file_give'):
+        raw_files.extend(request.files.getlist(key))
+
+    if len(raw_files) > MAX_POST_IMAGES_COUNT:
+        return jsonify({'result': 'fail', 'msg': f'Maksimal {MAX_POST_IMAGES_COUNT} gambar dalam satu postingan.'}), 400
+    if not comment_receive and len(raw_files) == 0:
+        return jsonify({'result': 'fail', 'msg': 'Isi postingan atau minimal satu gambar wajib diisi.'}), 400
+    if len(comment_receive) > 5000:
+        return jsonify({'result': 'fail', 'msg': 'Panjang postingan melebihi batas maksimal 5000 karakter.'}), 400
+
+    validated_payloads = []
+    for f in raw_files:
+        try:
+            validated_payloads.append(validate_post_image_file(f))
+        except ValueError as err:
+            return jsonify({'result': 'fail', 'msg': str(err)}), 400
+
+    saved_images = []
+    try:
+        for data_bytes, ext, mime_type, _size in validated_payloads:
+            saved_images.append(save_post_image_file(data_bytes, ext, mime_type))
+
+        created_doc = _create_published_post(
+            user_info=user_info,
+            comment_text=comment_receive,
+            date_str=date_receive,
+            images_list=saved_images,
+            community=comm_doc,
+        )
+        return jsonify({
+            'result': 'success',
+            'msg': 'Postingan komunitas berhasil dibuat.',
+            'post_id': created_doc['_id'],
+            'post': created_doc,
+        }), 201
+    except ValueError as verr:
+        for img in saved_images:
+            safe_delete_post_image(img.get('filename'), check_db_refs=False)
+        return jsonify({'result': 'fail', 'msg': str(verr)}), 400
+    except Exception as exc:
+        for img in saved_images:
+            safe_delete_post_image(img.get('filename'), check_db_refs=False)
+        return jsonify({'result': 'fail', 'msg': f'Gagal membuat postingan komunitas: {exc}'}), 500
 
 
 if __name__ == "__main__":

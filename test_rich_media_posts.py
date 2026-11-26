@@ -270,6 +270,9 @@ class _MockDB:
         self.comments = _MockCollection()
         self.notifications = _MockCollection()
         self.drafts = _MockCollection()
+        self.communities = _MockCollection()
+        self.community_members = _MockCollection()
+        self.community_requests = _MockCollection()
 
 
 def run_tests(use_mock_db=False):

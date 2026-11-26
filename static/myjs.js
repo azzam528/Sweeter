@@ -43,10 +43,14 @@ function sanitizePostImageUrl(url) {
   if (/^(javascript|data|vbscript):/i.test(url)) {
     return '';
   }
-  if (url.startsWith('/uploads/posts/') || url.startsWith('/static/')) {
+  if (url.startsWith('/uploads/posts/') || url.startsWith('/uploads/communities/') || url.startsWith('/static/')) {
     return encodeURI(url);
   }
   return '';
+}
+
+function sanitizeCommunityImageUrl(url) {
+  return sanitizePostImageUrl(url);
 }
 
 window.postImagesRegistry = window.postImagesRegistry || {};
@@ -368,6 +372,15 @@ function render_post_card(post, isStitch) {
 
   let post_images_html = render_post_images_html(display_images, image_gallery_key, false);
 
+  const displayCommSlug = (post_type === 'repost' && orig) ? orig.community_slug : post.community_slug;
+  const displayCommName = (post_type === 'repost' && orig) ? orig.community_name : post.community_name;
+  let community_pill_html = '';
+  if (displayCommSlug) {
+    const safeCommSlug = escapeHtml(displayCommSlug);
+    const safeCommLabel = escapeHtml(displayCommName || displayCommSlug);
+    community_pill_html = `<a href="/communities/${encodeURIComponent(displayCommSlug)}" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container/80 text-on-secondary-container text-[11px] font-semibold hover:bg-secondary-container no-underline" title="Komunitas ${safeCommLabel}"><span class="material-symbols-outlined text-[12px]">groups</span><span>c/${safeCommSlug}</span></a>`;
+  }
+
   if (isStitch) {
     let edited_badge = is_edited
       ? `<span class="text-on-surface-variant font-caption text-caption italic ml-1 post-edited-indicator" id="edited-badge-${post['_id']}">· edited</span>`
@@ -407,8 +420,9 @@ function render_post_card(post, isStitch) {
             <img class="w-10 h-10 rounded-full object-cover shrink-0" src="${avatar_url}" alt="${profile_name_escaped}" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
           </a>
           <div class="flex flex-col min-w-0">
-            <div class="flex items-center gap-space-xs">
+            <div class="flex items-center gap-space-xs flex-wrap">
               <a href="/user/${encodeURIComponent(post_type === 'repost' && orig ? orig.username : post['username'])}" class="font-label-md text-label-md text-on-surface font-semibold truncate hover:underline no-underline text-inherit">${profile_name_escaped}</a>
+              ${community_pill_html}
             </div>
             <div class="flex items-center gap-space-xs text-on-surface-variant font-caption text-caption">
               <span>@${username_escaped}</span>
@@ -3303,16 +3317,20 @@ function submit_rich_post() {
     .html('<i class="fa fa-spinner fa-spin text-[13px]"></i><span>Mengunggah...</span>');
 
   const activeDraftId = window.draftState.draftId;
+  const selectedCommunityId = ($('#post-community-select').val() || '').trim();
   const formData = new FormData();
   formData.append('date_give', new Date().toISOString());
 
   let targetUrl = '/posting';
-  if (activeDraftId) {
+  if (activeDraftId && !selectedCommunityId) {
     targetUrl = `/api/drafts/${encodeURIComponent(activeDraftId)}/publish`;
     formData.append('content', content);
     formData.append('keep_images', JSON.stringify(window.composerExistingImages.map(img => img.filename)));
   } else {
     formData.append('comment_give', content);
+    if (selectedCommunityId) {
+      formData.append('community_id', selectedCommunityId);
+    }
   }
 
   window.composerImages.forEach(item => {
@@ -3819,6 +3837,685 @@ function load_single_post_detail(postId) {
     },
     error: function (xhr) {
       handle_ajax_error(xhr, 'Gagal memuat detail postingan.');
+    }
+  });
+}
+
+// ==========================================
+// COMMUNITY / CIRCLES CONTROLLER
+// ==========================================
+
+window.currentCommunityTab = 'all';
+window.communitiesNextCursor = null;
+window.communitiesHasMore = false;
+window.communitiesLoading = false;
+
+window.activeCommunity = null;
+window.communityComposerImages = [];
+
+function load_composer_communities() {
+  const $sel = $('#post-community-select');
+  if (!$sel.length) return;
+  $.ajax({
+    type: 'GET',
+    url: '/api/communities?tab=joined&limit=50',
+    success: function (res) {
+      if (res.result !== 'success') return;
+      const list = res.communities || [];
+      $sel.find('option:not(:first)').remove();
+      list.forEach(c => {
+        const prefix = c.visibility === 'private' ? '[Privat] ' : '';
+        $sel.append(`<option value="${escapeHtml(c._id)}">${prefix}${escapeHtml(c.name)} (/c/${escapeHtml(c.slug)})</option>`);
+      });
+    }
+  });
+}
+
+function auto_fill_community_slug(nameVal) {
+  const $slugInput = $('#comm-slug-input');
+  if (!$slugInput.length || $slugInput[0].dataset.manual === '1') return;
+  const generated = String(nameVal || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+  $slugInput.val(generated);
+}
+
+function open_create_community_modal() {
+  $('#create-community-error').addClass('hidden').text('');
+  $('#create-community-form')[0].reset();
+  const $slugInput = $('#comm-slug-input');
+  if ($slugInput.length) {
+    delete $slugInput[0].dataset.manual;
+  }
+  $('#create-community-modal').removeClass('hidden');
+}
+
+function close_create_community_modal() {
+  $('#create-community-modal').addClass('hidden');
+}
+
+function submit_create_community(e) {
+  if (e) e.preventDefault();
+  const $err = $('#create-community-error');
+  $err.addClass('hidden').text('');
+
+  const name = ($('#comm-name-input').val() || '').trim();
+  const slug = ($('#comm-slug-input').val() || '').trim().toLowerCase();
+  const description = ($('#comm-desc-input').val() || '').trim();
+  const visibility = $('input[name="comm-visibility"]:checked').val() || 'public';
+
+  const fd = new FormData();
+  fd.append('name', name);
+  fd.append('slug', slug);
+  fd.append('description', description);
+  fd.append('visibility', visibility);
+
+  const avatarEl = document.getElementById('comm-avatar-input');
+  if (avatarEl && avatarEl.files && avatarEl.files[0]) {
+    fd.append('profile_image', avatarEl.files[0]);
+  }
+  const coverEl = document.getElementById('comm-cover-input');
+  if (coverEl && coverEl.files && coverEl.files[0]) {
+    fd.append('cover_image', coverEl.files[0]);
+  }
+
+  const $btn = $('#comm-create-submit-btn');
+  $btn.prop('disabled', true).text('Membuat...');
+
+  $.ajax({
+    type: 'POST',
+    url: '/api/communities',
+    data: fd,
+    contentType: false,
+    processData: false,
+    success: function (res) {
+      $btn.prop('disabled', false).text('Buat Komunitas');
+      if (res.result === 'success' && res.community) {
+        close_create_community_modal();
+        window.location.href = `/communities/${encodeURIComponent(res.community.slug)}`;
+      } else {
+        $err.removeClass('hidden').text(res.msg || 'Gagal membuat komunitas.');
+      }
+    },
+    error: function (xhr) {
+      $btn.prop('disabled', false).text('Buat Komunitas');
+      const msg = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : 'Gagal membuat komunitas.';
+      $err.removeClass('hidden').text(msg);
+    }
+  });
+}
+
+function switch_communities_tab(tab) {
+  window.currentCommunityTab = tab;
+  $('.comm-tab').removeClass('text-primary font-bold border-primary-container').addClass('text-on-surface-variant border-transparent');
+  $(`#ctab-${tab}`).removeClass('text-on-surface-variant border-transparent').addClass('text-primary font-bold border-primary-container');
+  load_communities(tab, '');
+}
+
+function load_communities(tab, cursor) {
+  tab = tab || window.currentCommunityTab || 'all';
+  if (window.communitiesLoading) return;
+  window.communitiesLoading = true;
+
+  const q = ($('#communities-search-input').val() || '').trim();
+  const isPagination = Boolean(cursor);
+  if (!isPagination) {
+    window.communitiesNextCursor = null;
+    window.communitiesHasMore = false;
+    $('#communities-list').html('<div class="text-center text-on-surface-variant py-8 font-body-sm"><i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat komunitas...</div>');
+  }
+
+  $.ajax({
+    type: 'GET',
+    url: `/api/communities?tab=${encodeURIComponent(tab)}&q=${encodeURIComponent(q)}&limit=15${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+    success: function (res) {
+      window.communitiesLoading = false;
+      if (res.result !== 'success') return;
+
+      const list = res.communities || [];
+      window.communitiesHasMore = Boolean(res.has_more);
+      window.communitiesNextCursor = res.next_cursor || null;
+
+      if (!isPagination) {
+        $('#communities-list').empty();
+      }
+      if (!isPagination && list.length === 0) {
+        $('#communities-list').html(`
+          <div class="bg-surface-container-lowest rounded-xl p-8 text-center shadow-sm">
+            <span class="material-symbols-outlined text-[40px] text-outline mb-2">groups</span>
+            <p class="font-label-md text-label-md text-on-surface mb-1">Belum ada komunitas ditemukan</p>
+            <p class="font-body-sm text-body-sm text-on-surface-variant mb-4">Coba kata kunci lain atau buat Community / Circle pertama Anda.</p>
+            <button type="button" onclick="open_create_community_modal()" class="px-5 py-2 rounded-full bg-primary-container text-on-primary font-label-md text-label-md border-0 cursor-pointer">Buat Circle</button>
+          </div>
+        `);
+      } else {
+        list.forEach(c => $('#communities-list').append(render_community_card(c)));
+      }
+
+      if (window.communitiesHasMore && window.communitiesNextCursor) {
+        $('#communities-load-more-wrap').removeClass('hidden');
+      } else {
+        $('#communities-load-more-wrap').addClass('hidden');
+      }
+    },
+    error: function (xhr) {
+      window.communitiesLoading = false;
+      handle_ajax_error(xhr, 'Gagal memuat daftar komunitas.');
+    }
+  });
+}
+
+function load_more_communities() {
+  if (window.communitiesHasMore && window.communitiesNextCursor) {
+    load_communities(window.currentCommunityTab, window.communitiesNextCursor);
+  }
+}
+
+function _build_community_card_action_btn(c) {
+  const slug = encodeURIComponent(c.slug);
+  if (c.is_member) {
+    if (c.my_role === 'creator') {
+      return `<a href="/communities/${slug}" class="px-3.5 py-1.5 rounded-full bg-secondary-container text-on-secondary-container font-label-sm text-label-sm no-underline font-semibold">Kelola</a>`;
+    }
+    return `<button type="button" onclick="leave_community_from_list('${slug}')" class="px-3.5 py-1.5 rounded-full bg-surface-container hover:bg-error-container hover:text-error text-on-surface font-label-sm text-label-sm border border-outline-variant/40 cursor-pointer">Keluar</button>`;
+  }
+  if (c.my_request_status === 'pending_invite') {
+    return `<button type="button" onclick="accept_invite_from_list('${slug}')" class="px-3.5 py-1.5 rounded-full bg-primary-container text-on-primary font-label-sm text-label-sm border-0 cursor-pointer hover:bg-primary">Terima Undangan</button>`;
+  }
+  if (c.my_request_status === 'pending_request') {
+    return `<span class="px-3 py-1 rounded-full bg-surface-container text-on-surface-variant font-caption text-caption font-semibold">Menunggu Persetujuan</span>`;
+  }
+  if (c.visibility === 'private') {
+    return `<button type="button" onclick="request_community_from_list('${slug}')" class="px-3.5 py-1.5 rounded-full bg-surface-container-high hover:bg-primary-container hover:text-on-primary text-on-surface font-label-sm text-label-sm border-0 cursor-pointer">Minta Gabung</button>`;
+  }
+  return `<button type="button" onclick="join_community_from_list('${slug}')" class="px-3.5 py-1.5 rounded-full bg-primary-container text-on-primary font-label-sm text-label-sm border-0 cursor-pointer hover:bg-primary">Gabung</button>`;
+}
+
+function render_community_card(c) {
+  const safeName = escapeHtml(c.name);
+  const safeSlug = escapeHtml(c.slug);
+  const safeDesc = escapeHtml(c.description || 'Belum ada deskripsi komunitas.');
+  const avatarUrl = c.profile_image && c.profile_image.url ? sanitizeCommunityImageUrl(c.profile_image.url) : '';
+  const coverUrl = c.cover_image && c.cover_image.url ? sanitizeCommunityImageUrl(c.cover_image.url) : '';
+  const visBadge = c.visibility === 'private'
+    ? '<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-semibold"><span class="material-symbols-outlined text-[12px]">lock</span>Private</span>'
+    : '<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-[10px] font-semibold"><span class="material-symbols-outlined text-[12px]">public</span>Public</span>';
+
+  return `
+    <article class="bg-surface-container-lowest rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all" id="comm-card-${escapeHtml(c._id)}">
+      <div class="h-16 w-full bg-gradient-to-r from-primary-container/80 to-tertiary-container/80 overflow-hidden">
+        ${coverUrl ? `<img src="${escapeHtml(coverUrl)}" alt="" class="w-full h-full object-cover"/>` : ''}
+      </div>
+      <div class="p-space-md -mt-6 flex items-start justify-between gap-3">
+        <div class="flex items-start gap-3 min-w-0">
+          <a href="/communities/${encodeURIComponent(c.slug)}" class="w-12 h-12 rounded-xl border-2 border-surface-container-lowest bg-secondary-container flex items-center justify-center overflow-hidden shadow shrink-0 no-underline">
+            ${avatarUrl ? `<img src="${escapeHtml(avatarUrl)}" alt="${safeName}" class="w-full h-full object-cover"/>` : `<span class="font-headline-sm font-bold text-primary">${safeName.charAt(0).toUpperCase()}</span>`}
+          </a>
+          <div class="min-w-0 pt-5">
+            <div class="flex items-center gap-2 flex-wrap">
+              <a href="/communities/${encodeURIComponent(c.slug)}" class="font-label-md text-label-md font-bold text-on-surface hover:underline no-underline truncate">${safeName}</a>
+              ${visBadge}
+            </div>
+            <p class="font-caption text-caption text-on-surface-variant m-0">/c/${safeSlug} · ${c.member_count} anggota</p>
+            <p class="font-body-sm text-body-sm text-on-surface-variant mt-1.5 mb-0 line-clamp-2">${safeDesc}</p>
+          </div>
+        </div>
+        <div class="pt-5 shrink-0">
+          ${_build_community_card_action_btn(c)}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function join_community_from_list(slug) {
+  $.post(`/api/communities/${slug}/join`, function () { load_communities(window.currentCommunityTab); })
+    .fail(function (xhr) { handle_ajax_error(xhr, 'Gagal bergabung.'); });
+}
+function leave_community_from_list(slug) {
+  if (!confirm('Keluar dari komunitas ini?')) return;
+  $.post(`/api/communities/${slug}/leave`, function () { load_communities(window.currentCommunityTab); })
+    .fail(function (xhr) { handle_ajax_error(xhr, 'Gagal keluar dari komunitas.'); });
+}
+function request_community_from_list(slug) {
+  $.post(`/api/communities/${slug}/request`, function () { load_communities(window.currentCommunityTab); })
+    .fail(function (xhr) { handle_ajax_error(xhr, 'Gagal mengirim permintaan.'); });
+}
+function accept_invite_from_list(slug) {
+  $.post(`/api/communities/${slug}/invite/accept`, function () { load_communities(window.currentCommunityTab); })
+    .fail(function (xhr) { handle_ajax_error(xhr, 'Gagal menerima undangan.'); });
+}
+
+// --- Detail Page Controller ---
+
+function init_community_detail_page() {
+  const rawEl = document.getElementById('initial-community-data');
+  if (!rawEl) return;
+  try {
+    window.activeCommunity = JSON.parse(rawEl.textContent || '{}');
+  } catch (e) {
+    return;
+  }
+  render_community_actions();
+  update_community_detail_access_ui();
+  load_community_posts();
+}
+
+function render_community_actions() {
+  const c = window.activeCommunity;
+  if (!c) return;
+  const $box = $('#comm-action-controls');
+  const slug = encodeURIComponent(c.slug);
+  let html = '';
+
+  if (c.is_member) {
+    if (c.my_role === 'creator') {
+      html += `<span class="px-3 py-1 rounded-full bg-secondary-container text-on-secondary-container font-caption text-caption font-semibold">Creator</span>`;
+      html += `<button type="button" onclick="$('#edit-community-modal').removeClass('hidden')" class="px-4 py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm text-label-sm border-0 cursor-pointer">Edit</button>`;
+      html += `<button type="button" onclick="delete_community()" class="px-3.5 py-1.5 rounded-full bg-error-container hover:bg-error hover:text-on-error text-on-error-container font-label-sm text-label-sm border-0 cursor-pointer">Hapus</button>`;
+    } else {
+      if (c.my_role === 'moderator') {
+        html += `<button type="button" onclick="$('#edit-community-modal').removeClass('hidden')" class="px-4 py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm text-label-sm border-0 cursor-pointer">Edit</button>`;
+      }
+      html += `<button type="button" onclick="leave_active_community()" class="px-4 py-1.5 rounded-full bg-surface-container hover:bg-error-container hover:text-error text-on-surface font-label-sm text-label-sm border border-outline-variant/50 cursor-pointer">Keluar</button>`;
+    }
+  } else if (c.my_request_status === 'pending_invite') {
+    html += `<button type="button" onclick="accept_active_invite()" class="px-4 py-1.5 rounded-full bg-primary-container text-on-primary font-label-sm text-label-sm border-0 cursor-pointer hover:bg-primary">Terima Undangan</button>`;
+    html += `<button type="button" onclick="decline_active_invite()" class="px-3.5 py-1.5 rounded-full bg-surface-container text-on-surface-variant font-label-sm text-label-sm border-0 cursor-pointer">Tolak</button>`;
+  } else if (c.my_request_status === 'pending_request') {
+    html += `<span class="px-3 py-1 rounded-full bg-surface-container text-on-surface-variant font-caption text-caption font-semibold">Menunggu Persetujuan</span>`;
+    html += `<button type="button" onclick="cancel_active_request()" class="px-3.5 py-1.5 rounded-full bg-surface-container hover:bg-error-container hover:text-error text-on-surface font-label-sm text-label-sm border-0 cursor-pointer">Batalkan</button>`;
+  } else if (c.visibility === 'private') {
+    html += `<button type="button" onclick="request_active_community()" class="px-4 py-1.5 rounded-full bg-primary-container text-on-primary font-label-sm text-label-sm border-0 cursor-pointer hover:bg-primary">Minta Bergabung</button>`;
+  } else {
+    html += `<button type="button" onclick="join_active_community()" class="px-4 py-1.5 rounded-full bg-primary-container text-on-primary font-label-sm text-label-sm border-0 cursor-pointer hover:bg-primary">Gabung Komunitas</button>`;
+  }
+
+  $box.html(html);
+  $('#comm-member-count').text(c.member_count);
+}
+
+function update_community_detail_access_ui() {
+  const c = window.activeCommunity;
+  if (!c) return;
+  if (c.is_member) {
+    $('#community-post-composer').removeClass('hidden');
+  } else {
+    $('#community-post-composer').addClass('hidden');
+  }
+  if (c.can_manage) {
+    $('#cdtab-requests').removeClass('hidden');
+  } else {
+    $('#cdtab-requests').addClass('hidden');
+  }
+}
+
+function _apply_updated_active_community(comm) {
+  if (!comm) return;
+  window.activeCommunity = comm;
+  $('#comm-title').text(comm.name);
+  $('#comm-desc-label').text(comm.description || 'Belum ada deskripsi komunitas.');
+  $('#comm-member-count').text(comm.member_count);
+  if (comm.profile_image && comm.profile_image.url) {
+    if ($('#comm-avatar-img').length) {
+      $('#comm-avatar-img').attr('src', sanitizeCommunityImageUrl(comm.profile_image.url));
+    }
+  }
+  if (comm.cover_image && comm.cover_image.url) {
+    $('#comm-cover-img').attr('src', sanitizeCommunityImageUrl(comm.cover_image.url)).removeClass('hidden');
+  }
+  render_community_actions();
+  update_community_detail_access_ui();
+  load_community_posts();
+}
+
+function join_active_community() {
+  $.post(`/api/communities/${encodeURIComponent(window.activeCommunity.slug)}/join`, function (res) {
+    if (res.result === 'success') _apply_updated_active_community(res.community);
+  }).fail(function (xhr) { handle_ajax_error(xhr, 'Gagal bergabung.'); });
+}
+
+function leave_active_community() {
+  if (!confirm('Apakah Anda yakin ingin keluar dari komunitas ini?')) return;
+  $.post(`/api/communities/${encodeURIComponent(window.activeCommunity.slug)}/leave`, function (res) {
+    if (res.result === 'success') _apply_updated_active_community(res.community);
+  }).fail(function (xhr) { handle_ajax_error(xhr, 'Gagal keluar dari komunitas.'); });
+}
+
+function request_active_community() {
+  $.post(`/api/communities/${encodeURIComponent(window.activeCommunity.slug)}/request`, function (res) {
+    if (res.result === 'success') _apply_updated_active_community(res.community);
+  }).fail(function (xhr) { handle_ajax_error(xhr, 'Gagal mengirim permintaan.'); });
+}
+
+function cancel_active_request() {
+  $.post(`/api/communities/${encodeURIComponent(window.activeCommunity.slug)}/request/cancel`, function (res) {
+    if (res.result === 'success') _apply_updated_active_community(res.community);
+  }).fail(function (xhr) { handle_ajax_error(xhr, 'Gagal membatalkan permintaan.'); });
+}
+
+function accept_active_invite() {
+  $.post(`/api/communities/${encodeURIComponent(window.activeCommunity.slug)}/invite/accept`, function (res) {
+    if (res.result === 'success') _apply_updated_active_community(res.community);
+  }).fail(function (xhr) { handle_ajax_error(xhr, 'Gagal menerima undangan.'); });
+}
+
+function decline_active_invite() {
+  $.post(`/api/communities/${encodeURIComponent(window.activeCommunity.slug)}/invite/decline`, function (res) {
+    if (res.result === 'success') _apply_updated_active_community(res.community);
+  }).fail(function (xhr) { handle_ajax_error(xhr, 'Gagal menolak undangan.'); });
+}
+
+function switch_community_detail_tab(tab) {
+  $('.comm-dtab').removeClass('text-primary font-bold border-primary-container').addClass('text-on-surface-variant border-transparent');
+  $(`#cdtab-${tab}`).removeClass('text-on-surface-variant border-transparent').addClass('text-primary font-bold border-primary-container');
+  $('#comm-panel-posts, #comm-panel-members, #comm-panel-requests').addClass('hidden');
+  $(`#comm-panel-${tab}`).removeClass('hidden');
+
+  if (tab === 'posts') load_community_posts();
+  else if (tab === 'members') load_community_members();
+  else if (tab === 'requests') load_community_requests();
+}
+
+function load_community_posts() {
+  const c = window.activeCommunity;
+  if (!c) return;
+  if (c.visibility === 'private' && !c.is_member) {
+    $('#community-posts-box').html(`
+      <div class="bg-surface-container-lowest rounded-xl p-8 text-center shadow-sm">
+        <span class="material-symbols-outlined text-[40px] text-amber-700 mb-2">lock</span>
+        <p class="font-label-md text-label-md text-on-surface mb-1">Komunitas Privat</p>
+        <p class="font-body-sm text-body-sm text-on-surface-variant m-0">Bergabunglah melalui permintaan keanggotaan atau undangan pengelola untuk melihat dan menulis postingan.</p>
+      </div>
+    `);
+    return;
+  }
+
+  $.ajax({
+    type: 'GET',
+    url: `/api/communities/${encodeURIComponent(c.slug)}/posts`,
+    success: function (res) {
+      if (res.result !== 'success') return;
+      const posts = res.posts || [];
+      if (posts.length === 0) {
+        $('#community-posts-box').html('<div class="bg-surface-container-lowest rounded-xl p-8 text-center text-on-surface-variant font-body-sm shadow-sm">Belum ada postingan di komunitas ini.</div>');
+        return;
+      }
+      let html = '';
+      posts.forEach(p => { html += render_post_card(p, true); });
+      $('#community-posts-box').html(html);
+    },
+    error: function (xhr) {
+      if (xhr.status === 403) {
+        $('#community-posts-box').html('<div class="bg-surface-container-lowest rounded-xl p-8 text-center text-on-surface-variant font-body-sm shadow-sm">Hanya anggota yang dapat melihat postingan komunitas privat ini.</div>');
+      } else {
+        handle_ajax_error(xhr, 'Gagal memuat postingan komunitas.');
+      }
+    }
+  });
+}
+
+function load_community_members() {
+  const c = window.activeCommunity;
+  if (!c) return;
+  if (c.visibility === 'private' && !c.is_member) {
+    $('#community-members-box').html('<div class="bg-surface-container-lowest rounded-xl p-6 text-center text-on-surface-variant font-body-sm shadow-sm">Daftar anggota disembunyikan untuk non-anggota komunitas privat.</div>');
+    return;
+  }
+  $.ajax({
+    type: 'GET',
+    url: `/api/communities/${encodeURIComponent(c.slug)}/members`,
+    success: function (res) {
+      if (res.result !== 'success') return;
+      const members = res.members || [];
+      let html = '';
+      members.forEach(m => {
+        const avatar = sanitizeAvatarUrl(m.profile_pic_real);
+        const roleBadge = m.role === 'creator'
+          ? '<span class="px-2 py-0.5 rounded-full bg-primary-container text-on-primary text-[10px] font-semibold">Creator</span>'
+          : (m.role === 'moderator' ? '<span class="px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container text-[10px] font-semibold">Moderator</span>' : '');
+        let manageBtns = '';
+        if (c.can_manage && m.role !== 'creator') {
+          if (c.my_role === 'creator') {
+            const nextRole = m.role === 'moderator' ? 'member' : 'moderator';
+            const roleLabel = m.role === 'moderator' ? 'Jadikan Member' : 'Jadikan Moderator';
+            manageBtns += `<button type="button" onclick="update_community_member_role('${escapeHtml(m.username)}', '${nextRole}')" class="px-2.5 py-1 rounded-full bg-surface-container text-on-surface text-caption border-0 cursor-pointer">${roleLabel}</button>`;
+          }
+          manageBtns += `<button type="button" onclick="remove_community_member('${escapeHtml(m.username)}')" class="px-2.5 py-1 rounded-full bg-error-container text-on-error-container text-caption border-0 cursor-pointer">Keluarkan</button>`;
+        }
+        html += `
+          <div class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm flex items-center justify-between gap-3">
+            <a href="/user/${encodeURIComponent(m.username)}" class="flex items-center gap-3 min-w-0 no-underline text-inherit">
+              <img src="${avatar}" alt="${escapeHtml(m.profile_name)}" class="w-10 h-10 rounded-full object-cover shrink-0"/>
+              <div class="min-w-0">
+                <div class="flex items-center gap-1.5">
+                  <span class="font-label-md text-label-md font-bold text-on-surface truncate">${escapeHtml(m.profile_name)}</span>
+                  ${roleBadge}
+                </div>
+                <span class="font-caption text-caption text-on-surface-variant">@${escapeHtml(m.username)}</span>
+              </div>
+            </a>
+            <div class="flex items-center gap-1.5 shrink-0">${manageBtns}</div>
+          </div>
+        `;
+      });
+      $('#community-members-box').html(html || '<div class="text-center text-on-surface-variant py-6 font-body-sm">Belum ada anggota.</div>');
+    },
+    error: function (xhr) { handle_ajax_error(xhr, 'Gagal memuat daftar anggota.'); }
+  });
+}
+
+function load_community_requests() {
+  const c = window.activeCommunity;
+  if (!c || !c.can_manage) return;
+  $.ajax({
+    type: 'GET',
+    url: `/api/communities/${encodeURIComponent(c.slug)}/requests`,
+    success: function (res) {
+      if (res.result !== 'success') return;
+      const items = res.requests || [];
+      if (!items.length) {
+        $('#community-requests-box').html('<div class="bg-surface-container-lowest rounded-xl p-6 text-center text-on-surface-variant font-body-sm shadow-sm">Tidak ada permintaan atau undangan tertunda.</div>');
+        return;
+      }
+      let html = '';
+      items.forEach(r => {
+        const avatar = sanitizeAvatarUrl(r.profile_pic_real);
+        const typeLabel = r.request_type === 'invite' ? 'Undangan Terkirim' : 'Permintaan Bergabung';
+        const actions = r.request_type === 'request'
+          ? `<button type="button" onclick="approve_community_request('${escapeHtml(r.user_id)}')" class="px-3 py-1 rounded-full bg-primary-container text-on-primary text-caption font-semibold border-0 cursor-pointer">Setujui</button>
+             <button type="button" onclick="reject_community_request('${escapeHtml(r.user_id)}')" class="px-3 py-1 rounded-full bg-error-container text-on-error-container text-caption font-semibold border-0 cursor-pointer">Tolak</button>`
+          : `<button type="button" onclick="reject_community_request('${escapeHtml(r.user_id)}')" class="px-3 py-1 rounded-full bg-surface-container text-on-surface-variant text-caption border-0 cursor-pointer">Batalkan</button>`;
+        html += `
+          <div class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0">
+              <img src="${avatar}" alt="" class="w-10 h-10 rounded-full object-cover shrink-0"/>
+              <div class="min-w-0">
+                <div class="font-label-md text-label-md font-bold text-on-surface truncate">${escapeHtml(r.profile_name)} <span class="font-normal text-on-surface-variant">@${escapeHtml(r.user_id)}</span></div>
+                <div class="font-caption text-caption text-on-surface-variant">${typeLabel}</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">${actions}</div>
+          </div>
+        `;
+      });
+      $('#community-requests-box').html(html);
+    },
+    error: function (xhr) { handle_ajax_error(xhr, 'Gagal memuat permintaan keanggotaan.'); }
+  });
+}
+
+function submit_invite_member(e) {
+  if (e) e.preventDefault();
+  const uname = ($('#comm-invite-username').val() || '').trim().replace(/^@/, '');
+  if (!uname) return;
+  $.ajax({
+    type: 'POST',
+    url: `/api/communities/${encodeURIComponent(window.activeCommunity.slug)}/invite`,
+    contentType: 'application/json',
+    data: JSON.stringify({ username: uname }),
+    success: function (res) {
+      $('#comm-invite-username').val('');
+      alert(res.msg || 'Undangan terkirim.');
+      load_community_requests();
+    },
+    error: function (xhr) { handle_ajax_error(xhr, 'Gagal mengundang pengguna.'); }
+  });
+}
+
+function approve_community_request(targetUsername) {
+  $.post(`/api/communities/${encodeURIComponent(window.activeCommunity.slug)}/requests/${encodeURIComponent(targetUsername)}/approve`, function (res) {
+    if (res.community) _apply_updated_active_community(res.community);
+    load_community_requests();
+  }).fail(function (xhr) { handle_ajax_error(xhr, 'Gagal menyetujui.'); });
+}
+
+function reject_community_request(targetUsername) {
+  $.post(`/api/communities/${encodeURIComponent(window.activeCommunity.slug)}/requests/${encodeURIComponent(targetUsername)}/reject`, function () {
+    load_community_requests();
+  }).fail(function (xhr) { handle_ajax_error(xhr, 'Gagal menolak.'); });
+}
+
+function remove_community_member(targetUsername) {
+  if (!confirm(`Keluarkan @${targetUsername} dari komunitas?`)) return;
+  $.post(`/api/communities/${encodeURIComponent(window.activeCommunity.slug)}/members/${encodeURIComponent(targetUsername)}/remove`, function (res) {
+    if (res.community) _apply_updated_active_community(res.community);
+    load_community_members();
+  }).fail(function (xhr) { handle_ajax_error(xhr, 'Gagal mengeluarkan anggota.'); });
+}
+
+function update_community_member_role(targetUsername, role) {
+  $.ajax({
+    type: 'POST',
+    url: `/api/communities/${encodeURIComponent(window.activeCommunity.slug)}/members/${encodeURIComponent(targetUsername)}/role`,
+    contentType: 'application/json',
+    data: JSON.stringify({ role: role }),
+    success: function () { load_community_members(); },
+    error: function (xhr) { handle_ajax_error(xhr, 'Gagal mengubah peran.'); }
+  });
+}
+
+function submit_edit_community(e) {
+  if (e) e.preventDefault();
+  const fd = new FormData();
+  fd.append('name', ($('#edit-comm-name').val() || '').trim());
+  fd.append('description', ($('#edit-comm-desc').val() || '').trim());
+  fd.append('visibility', $('#edit-comm-visibility').val() || 'public');
+  const av = document.getElementById('edit-comm-avatar');
+  if (av && av.files && av.files[0]) fd.append('profile_image', av.files[0]);
+  const cv = document.getElementById('edit-comm-cover');
+  if (cv && cv.files && cv.files[0]) fd.append('cover_image', cv.files[0]);
+
+  $.ajax({
+    type: 'POST',
+    url: `/api/communities/${encodeURIComponent(window.activeCommunity.slug)}/update`,
+    data: fd,
+    contentType: false,
+    processData: false,
+    success: function (res) {
+      $('#edit-community-modal').addClass('hidden');
+      if (res.community) _apply_updated_active_community(res.community);
+    },
+    error: function (xhr) { handle_ajax_error(xhr, 'Gagal memperbarui komunitas.'); }
+  });
+}
+
+function delete_community() {
+  if (!confirm('Hapus permanen komunitas ini beserta seluruh postingan di dalamnya?')) return;
+  $.ajax({
+    type: 'DELETE',
+    url: `/api/communities/${encodeURIComponent(window.activeCommunity.slug)}`,
+    success: function () {
+      window.location.href = '/communities';
+    },
+    error: function (xhr) { handle_ajax_error(xhr, 'Gagal menghapus komunitas.'); }
+  });
+}
+
+function handle_community_image_select(inputEl) {
+  const files = Array.from((inputEl && inputEl.files) || []);
+  $('#comm-post-error').addClass('hidden').text('');
+  for (const f of files) {
+    if (window.communityComposerImages.length >= 4) {
+      $('#comm-post-error').removeClass('hidden').text('Maksimal 4 gambar dalam satu postingan.');
+      break;
+    }
+    if (f.size > 5 * 1024 * 1024) {
+      $('#comm-post-error').removeClass('hidden').text('Ukuran tiap gambar maksimal 5 MB.');
+      continue;
+    }
+    window.communityComposerImages.push({
+      file: f,
+      url: URL.createObjectURL(f)
+    });
+  }
+  if (inputEl) inputEl.value = '';
+  render_community_composer_previews();
+}
+
+function render_community_composer_previews() {
+  const $wrap = $('#comm-post-image-preview');
+  const $grid = $('#comm-post-preview-grid');
+  $grid.empty();
+  if (!window.communityComposerImages.length) {
+    $wrap.addClass('hidden');
+    return;
+  }
+  window.communityComposerImages.forEach((item, idx) => {
+    $grid.append(`
+      <div class="composer-preview-item">
+        <img src="${item.url}" alt="Preview"/>
+        <button type="button" class="composer-preview-remove" onclick="remove_community_composer_image(${idx})">&times;</button>
+      </div>
+    `);
+  });
+  $wrap.removeClass('hidden');
+}
+
+function remove_community_composer_image(idx) {
+  const item = window.communityComposerImages[idx];
+  if (item && item.url) try { URL.revokeObjectURL(item.url); } catch (e) { }
+  window.communityComposerImages.splice(idx, 1);
+  render_community_composer_previews();
+}
+
+function submit_community_post() {
+  const c = window.activeCommunity;
+  if (!c) return;
+  const content = ($('#comm-post-textarea').val() || '').trim();
+  if (!content && !window.communityComposerImages.length) {
+    $('#comm-post-error').removeClass('hidden').text('Tulis sesuatu atau pilih gambar terlebih dahulu.');
+    return;
+  }
+  const fd = new FormData();
+  fd.append('comment_give', content);
+  fd.append('date_give', new Date().toISOString());
+  window.communityComposerImages.forEach(item => fd.append('images', item.file));
+
+  const $btn = $('#comm-post-submit-btn');
+  $btn.prop('disabled', true).text('Mengirim...');
+  $.ajax({
+    type: 'POST',
+    url: `/api/communities/${encodeURIComponent(c.slug)}/posts`,
+    data: fd,
+    contentType: false,
+    processData: false,
+    success: function (res) {
+      $btn.prop('disabled', false).text('Kirim ke Circle');
+      $('#comm-post-textarea').val('');
+      window.communityComposerImages.forEach(x => { try { URL.revokeObjectURL(x.url); } catch (e) {} });
+      window.communityComposerImages = [];
+      render_community_composer_previews();
+      load_community_posts();
+    },
+    error: function (xhr) {
+      $btn.prop('disabled', false).text('Kirim ke Circle');
+      handle_ajax_error(xhr, 'Gagal mengirim postingan komunitas.');
     }
   });
 }

@@ -93,6 +93,21 @@ def init_indexes():
             unique=True,
             partialFilterExpression={"client_draft_key": {"$type": "string"}}
         )
+        # 27. Index untuk Communities / Circles
+        db.communities.create_index([("slug", 1)], unique=True)
+        db.communities.create_index([("visibility", 1), ("member_count", -1), ("created_at", -1)])
+        db.communities.create_index([("creator_id", 1)])
+        db.communities.create_index([("profile_image.filename", 1)])
+        db.communities.create_index([("cover_image.filename", 1)])
+        # 28. Index untuk Community Membership
+        db.community_members.create_index([("community_id", 1), ("user_id", 1)], unique=True)
+        db.community_members.create_index([("user_id", 1), ("joined_at", -1)])
+        db.community_members.create_index([("community_id", 1), ("role", 1)])
+        # 29. Index untuk Community Requests & Invites
+        db.community_requests.create_index([("community_id", 1), ("user_id", 1), ("status", 1)])
+        db.community_requests.create_index([("user_id", 1), ("status", 1), ("created_at", -1)])
+        # 30. Compound index postingan komunitas
+        db.posts.create_index([("community_id", 1), ("date", -1)])
     except Exception as e:
         print(f"Warning saat inisialisasi index MongoDB: {e}")
 
@@ -198,7 +213,8 @@ def get_trending_hashtags(limit: int = 10, period: str = 'all') -> list:
     """
     match_filter = {
         'hashtags': {'$exists': True, '$ne': []},
-        'post_type': {'$ne': 'repost'}
+        'post_type': {'$ne': 'repost'},
+        'community_visibility': {'$ne': 'private'}
     }
     if period == 'today':
         cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{{ community.name | e }} (/c/{{ community.slug | e }}) | Sweeter</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"/>
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='mystyle.css') }}"/>
+  <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            "surface-container-highest": "#e3e2e0", "surface-dim": "#dbdad8",
+            "background": "#faf9f7", "surface-container-high": "#e9e8e6",
+            "on-primary": "#ffffff", "on-secondary-fixed-variant": "#4e4542",
+            "on-primary-fixed": "#321112", "primary-fixed": "#ffdad9",
+            "on-surface-variant": "#514443", "on-error-container": "#93000a",
+            "on-tertiary-fixed": "#2f1314", "inverse-on-surface": "#f1f1ef",
+            "secondary-container": "#ecdcd8", "error": "#ba1a1a",
+            "tertiary-fixed": "#ffdad9", "outline": "#837373",
+            "on-secondary-fixed": "#211a18", "surface-tint": "#805252",
+            "inverse-primary": "#f3b8b7", "primary-fixed-dim": "#f3b8b7",
+            "on-background": "#1a1c1b", "inverse-surface": "#2f3130",
+            "on-tertiary-fixed-variant": "#613d3d", "secondary-fixed": "#eedfdb",
+            "on-error": "#ffffff", "surface-container-lowest": "#ffffff",
+            "on-tertiary": "#ffffff", "on-tertiary-container": "#c99a99",
+            "primary-container": "#583030", "surface": "#faf9f7",
+            "surface-container": "#efeeec", "tertiary-container": "#543232",
+            "surface-container-low": "#f4f3f1", "secondary": "#675c59",
+            "on-surface": "#1a1c1b", "tertiary-fixed-dim": "#ecbab9",
+            "on-secondary-container": "#6b605d", "secondary-fixed-dim": "#d2c3c0",
+            "surface-variant": "#e3e2e0", "surface-bright": "#faf9f7",
+            "on-primary-fixed-variant": "#653b3b", "primary": "#3e1b1b",
+            "error-container": "#ffdad6", "on-secondary": "#ffffff",
+            "outline-variant": "#d5c2c1", "on-primary-container": "#cf9897",
+            "tertiary": "#3b1d1d"
+          },
+          borderRadius: { DEFAULT: "0.25rem", lg: "0.5rem", xl: "0.75rem", full: "9999px" },
+          spacing: {
+            "gutter-desktop": "2rem", "space-md": "1rem", "margin-desktop": "2.5rem",
+            "margin-tablet": "1.5rem", "margin": "1rem", "space-xs": "0.25rem",
+            "gutter": "1.25rem", "space-2xl": "3rem", "space-xl": "2rem",
+            "space-lg": "1.5rem", "space-sm": "0.5rem"
+          },
+          fontFamily: {
+            "body-md": ["Manrope"], "headline-xl-mobile": ["Manrope"],
+            "headline-lg": ["Manrope"], "body-sm": ["Manrope"],
+            "label-md": ["Manrope"], "headline-xl": ["Manrope"],
+            "headline-sm": ["Manrope"], "body-lg": ["Manrope"],
+            "caption": ["Manrope"], "label-sm": ["Manrope"]
+          },
+          fontSize: {
+            "body-md": ["0.9375rem", { lineHeight: "1.5rem", letterSpacing: "-0.005em", fontWeight: "400" }],
+            "headline-lg": ["1.5rem", { lineHeight: "2rem", letterSpacing: "-0.02em", fontWeight: "600" }],
+            "body-sm": ["0.875rem", { lineHeight: "1.375rem", letterSpacing: "0em", fontWeight: "400" }],
+            "label-md": ["0.875rem", { lineHeight: "1.25rem", letterSpacing: "0em", fontWeight: "600" }],
+            "headline-sm": ["1.25rem", { lineHeight: "1.75rem", letterSpacing: "-0.015em", fontWeight: "600" }],
+            "caption": ["0.6875rem", { lineHeight: "0.875rem", letterSpacing: "0.03em", fontWeight: "500" }],
+            "label-sm": ["0.75rem", { lineHeight: "1rem", letterSpacing: "0.02em", fontWeight: "500" }]
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body {
+      font-family: 'Manrope', sans-serif;
+      background-color: #faf9f7;
+      color: #1a1c1b;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+  </style>
+</head>
+<body class="bg-surface text-on-surface antialiased selection:bg-primary-fixed selection:text-on-primary-fixed">
+
+<!-- ===== TOP HEADER BAR ===== -->
+<header class="fixed top-0 left-0 right-0 h-16 z-40 backdrop-blur-md bg-surface/85 border-b border-surface-container/60">
+  <div class="max-w-7xl mx-auto h-full px-4 md:px-margin-desktop flex items-center justify-between">
+    <a class="flex items-center gap-2 text-primary font-bold text-xl tracking-tight no-underline" href="/">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Sweeter" class="h-8 w-8 rounded-lg object-contain"/>
+      <span>Sweeter</span>
+    </a>
+    <nav class="hidden md:flex items-center gap-space-lg">
+      <a class="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors no-underline" href="/">Home</a>
+      <a class="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors no-underline" href="/explore">Explore</a>
+      <a class="font-label-md text-label-md text-primary font-bold no-underline" href="/communities">Communities</a>
+      <a class="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors no-underline" href="/drafts">Drafts</a>
+      <a class="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors no-underline" href="/bookmarks">Bookmarks</a>
+    </nav>
+    <div class="flex items-center gap-space-md">
+      <div class="flex items-center gap-space-sm">
+        <span class="font-label-md text-label-md text-on-surface hidden sm:inline-block">{{ user_info.profile_name | e }}</span>
+        <a href="/user/{{ user_info.username | e }}">
+          <img alt="Profile"
+               class="w-8 h-8 rounded-full object-cover cursor-pointer"
+               src="/static/{{ user_info.profile_pic_real | e }}"
+               onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+        </a>
+      </div>
+      <form action="/sign_out" method="post" class="inline m-0">
+        <button type="submit"
+                class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full hover:bg-surface-container border-0 bg-transparent cursor-pointer">
+          Sign Out
+        </button>
+      </form>
+    </div>
+  </div>
+</header>
+
+<div class="max-w-7xl mx-auto px-4 md:px-margin-desktop">
+
+  <!-- ===== LEFT SIDEBAR ===== -->
+  <aside class="hidden md:flex fixed top-16 left-[max(1rem,calc((100vw-80rem)/2+2.5rem))] h-[calc(100vh-4rem)] w-[240px] z-30 flex-col justify-between py-space-lg pr-space-md bg-transparent">
+    <div class="flex flex-col gap-space-lg">
+      <nav class="flex flex-col gap-space-xs">
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/">
+          <span class="material-symbols-outlined text-[22px]">home</span>
+          <span class="font-label-md text-label-md">Home</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/explore">
+          <span class="material-symbols-outlined text-[22px]">explore</span>
+          <span class="font-label-md text-label-md">Explore</span>
+        </a>
+        <a aria-current="page" class="flex items-center gap-space-md px-space-md py-space-sm rounded-full transition-all bg-secondary-container text-on-secondary-container font-semibold no-underline" href="/communities">
+          <span class="material-symbols-outlined text-[22px]">groups</span>
+          <span class="font-label-md text-label-md">Communities</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/user/{{ user_info.username | e }}">
+          <span class="material-symbols-outlined text-[22px]">person</span>
+          <span class="font-label-md text-label-md">Profile</span>
+        </a>
+        <a class="flex items-center justify-between px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/drafts">
+          <div class="flex items-center gap-space-md">
+            <span class="material-symbols-outlined text-[22px]">drafts</span>
+            <span class="font-label-md text-label-md">Drafts</span>
+          </div>
+          <span id="nav-drafts-badge" class="hidden bg-secondary-container text-on-secondary-container text-caption font-bold px-2 py-0.5 rounded-full text-[11px] leading-tight"></span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/bookmarks">
+          <span class="material-symbols-outlined text-[22px]">bookmark</span>
+          <span class="font-label-md text-label-md">Bookmarks</span>
+        </a>
+        <a class="flex items-center justify-between px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/notifications" id="sidebar-notifications-link">
+          <div class="flex items-center gap-space-md">
+            <span class="material-symbols-outlined text-[22px]">notifications</span>
+            <span class="font-label-md text-label-md">Notifications</span>
+          </div>
+          <span id="nav-unread-badge" class="hidden bg-primary-container text-on-primary text-caption font-bold px-2 py-0.5 rounded-full text-[11px] leading-tight"></span>
+        </a>
+      </nav>
+      <a href="/communities" class="w-full flex items-center justify-center gap-space-xs py-space-sm px-space-lg bg-surface-container text-on-surface rounded-full font-label-md text-label-md hover:bg-surface-container-high transition-all no-underline">
+        <span class="material-symbols-outlined text-[20px]">arrow_back</span>
+        <span>Semua Circle</span>
+      </a>
+    </div>
+    <a href="/user/{{ user_info.username | e }}"
+       class="flex items-center justify-between p-space-sm rounded-xl bg-surface-container-low hover:bg-surface-container transition-colors cursor-pointer no-underline">
+      <div class="flex items-center gap-space-sm min-w-0">
+        <img alt="Profile"
+             class="w-10 h-10 rounded-full object-cover flex-shrink-0"
+             src="/static/{{ user_info.profile_pic_real | e }}"
+             onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+        <div class="flex flex-col min-w-0">
+          <span class="font-label-md text-label-md text-on-surface truncate">{{ user_info.profile_name | e }}</span>
+          <span class="font-caption text-caption text-on-surface-variant truncate">@{{ user_info.username | e }}</span>
+        </div>
+      </div>
+      <span class="material-symbols-outlined text-on-surface-variant text-[20px]">more_horiz</span>
+    </a>
+  </aside>
+
+  <!-- ===== MAIN CONTENT COLUMN ===== -->
+  <div class="pl-0 md:pl-[264px] pr-0 xl:pr-[344px] min-h-screen">
+    <main class="relative pt-16 bg-transparent max-w-[620px] mx-auto min-h-screen py-space-lg">
+      <div class="flex flex-col w-full gap-space-md" id="community-detail-root" data-slug="{{ community.slug | e }}" data-id="{{ community._id | e }}">
+
+        <!-- Community Hero Card -->
+        <section class="bg-surface-container-lowest rounded-2xl overflow-hidden shadow-sm">
+          <!-- Cover Image -->
+          <div class="h-36 sm:h-44 w-full bg-gradient-to-r from-primary-container to-tertiary-container relative overflow-hidden">
+            {% if community.cover_image and community.cover_image.url %}
+              <img id="comm-cover-img" src="{{ community.cover_image.url | e }}" alt="{{ community.name | e }} cover" class="w-full h-full object-cover"/>
+            {% else %}
+              <img id="comm-cover-img" src="" alt="" class="hidden w-full h-full object-cover"/>
+            {% endif %}
+          </div>
+
+          <div class="px-space-lg pb-space-lg pt-3 relative">
+            <div class="flex items-end justify-between gap-3 -mt-12 mb-3">
+              <div class="w-20 h-20 rounded-2xl border-4 border-surface-container-lowest bg-secondary-container flex items-center justify-center overflow-hidden shadow-md shrink-0">
+                {% if community.profile_image and community.profile_image.url %}
+                  <img id="comm-avatar-img" src="{{ community.profile_image.url | e }}" alt="{{ community.name | e }}" class="w-full h-full object-cover"/>
+                {% else %}
+                  <span id="comm-avatar-fallback" class="font-headline-lg text-headline-lg font-bold text-primary">{{ community.name[:1] | upper | e }}</span>
+                {% endif %}
+              </div>
+              <div id="comm-action-controls" class="flex flex-wrap items-center justify-end gap-2 pt-10">
+                <!-- Populated by render_community_actions() -->
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 mb-1">
+              <h1 id="comm-title" class="font-headline-sm text-headline-sm font-bold text-on-surface m-0">{{ community.name | e }}</h1>
+              <span id="comm-visibility-badge" class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold {{ 'bg-amber-100 text-amber-800' if community.visibility == 'private' else 'bg-secondary-container text-on-secondary-container' }}">
+                <span class="material-symbols-outlined text-[13px]">{{ 'lock' if community.visibility == 'private' else 'public' }}</span>
+                <span>{{ 'Private Circle' if community.visibility == 'private' else 'Public Community' }}</span>
+              </span>
+            </div>
+
+            <p class="font-caption text-caption text-on-surface-variant mb-2">
+              /c/<span id="comm-slug-label">{{ community.slug | e }}</span> ·
+              <span id="comm-member-count" class="font-semibold text-on-surface">{{ community.member_count }}</span> anggota ·
+              Dibuat oleh <a href="/user/{{ community.creator_id | e }}" class="text-primary hover:underline no-underline font-semibold">@{{ community.creator_id | e }}</a>
+            </p>
+
+            <p id="comm-desc-label" class="font-body-sm text-body-sm text-on-surface leading-relaxed m-0">
+              {{ community.description | e if community.description else 'Belum ada deskripsi komunitas.' }}
+            </p>
+          </div>
+
+          <!-- Detail Sub-Tabs -->
+          <div class="px-space-lg border-t border-surface-container flex items-center gap-space-lg">
+            <button id="cdtab-posts" onclick="switch_community_detail_tab('posts')" class="comm-dtab py-3 font-label-md text-label-md text-primary font-bold border-b-2 border-primary-container bg-transparent border-t-0 border-l-0 border-r-0 cursor-pointer">
+              Postingan
+            </button>
+            <button id="cdtab-members" onclick="switch_community_detail_tab('members')" class="comm-dtab py-3 font-label-md text-label-md text-on-surface-variant border-b-2 border-transparent bg-transparent border-t-0 border-l-0 border-r-0 cursor-pointer">
+              Anggota
+            </button>
+            <button id="cdtab-requests" onclick="switch_community_detail_tab('requests')" class="comm-dtab hidden py-3 font-label-md text-label-md text-on-surface-variant border-b-2 border-transparent bg-transparent border-t-0 border-l-0 border-r-0 cursor-pointer">
+              Permintaan &amp; Undangan
+            </button>
+          </div>
+        </section>
+
+        <!-- Member Post Composer inside Community -->
+        <section id="community-post-composer" class="hidden bg-surface-container-lowest rounded-xl p-space-md shadow-sm">
+          <div class="flex items-start gap-space-sm">
+            <img alt="Your avatar"
+                 class="w-10 h-10 rounded-full object-cover shrink-0"
+                 src="/static/{{ user_info.profile_pic_real | e }}"
+                 onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+            <div class="flex-1 min-w-0">
+              <textarea id="comm-post-textarea"
+                        class="w-full bg-surface-container-low rounded-lg p-space-sm font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary-container resize-none transition-all"
+                        placeholder="Bagikan sesuatu ke {{ community.name | e }}..."
+                        maxlength="5000"
+                        rows="3"></textarea>
+              <div id="comm-post-error" class="hidden mt-space-xs px-space-sm py-1.5 rounded-lg bg-error-container text-on-error-container font-label-sm text-label-sm"></div>
+              <div id="comm-post-image-preview" class="hidden mt-space-sm">
+                <div id="comm-post-preview-grid" class="composer-preview-grid"></div>
+              </div>
+              <div class="flex items-center justify-between mt-space-sm pt-space-xs border-t border-surface-container/60">
+                <div class="flex items-center gap-2">
+                  <input id="comm-post-image-input" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple class="hidden" onchange="handle_community_image_select(this)"/>
+                  <button type="button" onclick="$('#comm-post-image-input').click()" class="px-space-sm py-1.5 rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-primary border-0 bg-transparent cursor-pointer flex items-center gap-1 font-label-sm text-label-sm">
+                    <span class="material-symbols-outlined text-[18px]">image</span>
+                    <span>Gambar</span>
+                  </button>
+                </div>
+                <button type="button" id="comm-post-submit-btn" onclick="submit_community_post()" class="px-space-lg py-space-xs bg-primary-container text-on-primary font-label-md text-label-md rounded-full hover:bg-primary border-0 cursor-pointer shadow-sm">
+                  Kirim ke Circle
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tab Panels -->
+        <div id="comm-panel-posts" class="flex flex-col gap-space-md">
+          <div id="community-posts-box" class="flex flex-col gap-space-md">
+            <div class="text-center text-on-surface-variant py-8 font-body-sm">
+              <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat postingan komunitas...
+            </div>
+          </div>
+        </div>
+
+        <div id="comm-panel-members" class="hidden flex flex-col gap-space-sm">
+          <div id="community-members-box" class="flex flex-col gap-space-sm"></div>
+        </div>
+
+        <div id="comm-panel-requests" class="hidden flex flex-col gap-space-md">
+          <!-- Invite User Form -->
+          <div class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm">
+            <h3 class="font-label-md text-label-md text-on-surface mb-2 mt-0">Undang Pengguna ke Komunitas</h3>
+            <form onsubmit="submit_invite_member(event)" class="flex items-center gap-2">
+              <input id="comm-invite-username" type="text" required placeholder="Masukkan username (tanpa @)..."
+                     class="flex-1 px-3 py-2 rounded-full bg-surface-container-low border border-outline-variant/40 font-body-sm text-body-sm focus:outline-none focus:ring-1 focus:ring-primary-container"/>
+              <button type="submit" class="px-4 py-2 rounded-full bg-primary-container text-on-primary font-label-sm text-label-sm border-0 cursor-pointer hover:bg-primary">Kirim Undangan</button>
+            </form>
+          </div>
+          <div id="community-requests-box" class="flex flex-col gap-space-sm"></div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- ===== RIGHT SIDEBAR ===== -->
+  <aside class="hidden xl:flex flex-col fixed top-16 right-[max(1rem,calc((100vw-80rem)/2+2.5rem))] h-[calc(100vh-4rem)] w-[320px] z-30 py-space-lg pl-space-md overflow-y-auto">
+    <div class="flex flex-col gap-space-lg">
+      <div class="p-space-lg bg-surface-container-lowest rounded-xl shadow-[0_4px_16px_-2px_rgba(88,48,48,0.03)]">
+        <h3 class="font-headline-sm text-headline-sm text-on-surface mb-space-sm">Tentang {{ community.name | e }}</h3>
+        <p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed mb-2">
+          Status: <strong>{{ 'Private Circle' if community.visibility == 'private' else 'Public Community' }}</strong>
+        </p>
+        <p class="font-caption text-caption text-outline leading-relaxed m-0">
+          Dibuat pada {{ community.created_at[:10] if community.created_at else '-' }} · @{{ community.creator_id | e }}
+        </p>
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+<!-- ===== EDIT COMMUNITY MODAL ===== -->
+<div id="edit-community-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onclick="if(event.target===this) $('#edit-community-modal').addClass('hidden')">
+  <div class="bg-surface-container-lowest w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+    <div class="px-space-lg py-space-md border-b border-surface-container flex items-center justify-between">
+      <h2 class="font-headline-sm text-headline-sm font-bold text-on-surface m-0">Edit Komunitas</h2>
+      <button type="button" onclick="$('#edit-community-modal').addClass('hidden')" class="w-8 h-8 rounded-full hover:bg-surface-container flex items-center justify-center border-0 bg-transparent cursor-pointer">
+        <span class="material-symbols-outlined text-[20px]">close</span>
+      </button>
+    </div>
+    <form onsubmit="submit_edit_community(event)" class="p-space-lg overflow-y-auto flex flex-col gap-space-md">
+      <div>
+        <label class="block font-label-md text-label-md text-on-surface mb-1">Nama Komunitas</label>
+        <input id="edit-comm-name" type="text" required minlength="3" maxlength="60" value="{{ community.name | e }}"
+               class="w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant/40 font-body-sm text-body-sm"/>
+      </div>
+      <div>
+        <label class="block font-label-md text-label-md text-on-surface mb-1">Deskripsi</label>
+        <textarea id="edit-comm-desc" rows="3" maxlength="500" class="w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant/40 font-body-sm text-body-sm resize-none">{{ community.description | e }}</textarea>
+      </div>
+      <div>
+        <label class="block font-label-md text-label-md text-on-surface mb-1">Visibilitas</label>
+        <select id="edit-comm-visibility" class="w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant/40 font-body-sm text-body-sm">
+          <option value="public" {{ 'selected' if community.visibility == 'public' else '' }}>Public (Siapa saja bisa bergabung)</option>
+          <option value="private" {{ 'selected' if community.visibility == 'private' else '' }}>Private (Permintaan / Undangan)</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label class="block font-label-sm text-label-sm text-on-surface mb-1">Ganti Foto Profil</label>
+          <input id="edit-comm-avatar" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" class="w-full text-xs"/>
+        </div>
+        <div>
+          <label class="block font-label-sm text-label-sm text-on-surface mb-1">Ganti Cover Image</label>
+          <input id="edit-comm-cover" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" class="w-full text-xs"/>
+        </div>
+      </div>
+      <div class="flex items-center justify-end gap-2 pt-2 border-t border-surface-container">
+        <button type="button" onclick="$('#edit-community-modal').addClass('hidden')" class="px-4 py-2 rounded-full bg-surface-container text-on-surface font-label-md text-label-md border-0 cursor-pointer">Batal</button>
+        <button type="submit" class="px-5 py-2 rounded-full bg-primary-container text-on-primary font-label-md text-label-md border-0 cursor-pointer hover:bg-primary">Simpan Perubahan</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script id="initial-community-data" type="application/json">{{ community | tojson | safe }}</script>
+<script src="{{ url_for('static', filename='myjs.js') }}"></script>
+<script>
+  $(document).ready(function () {
+    init_community_detail_page();
+    if (typeof fetch_unread_notifications_count === 'function') fetch_unread_notifications_count();
+    if (typeof fetch_drafts_count === 'function') fetch_drafts_count();
+  });
+</script>
+</body>
+</html>

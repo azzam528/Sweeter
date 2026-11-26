@@ -110,6 +110,12 @@ def create_notification(
             message = "merepost postingan Anda."
         elif notif_type == 'quote':
             message = "mengutip postingan Anda."
+        elif notif_type == 'community_join_request':
+            message = "meminta bergabung ke komunitas Anda."
+        elif notif_type == 'community_invite':
+            message = "mengundang Anda bergabung ke komunitas."
+        elif notif_type == 'community_request_approved':
+            message = "menyetujui permintaan bergabung Anda ke komunitas."
         else:
             message = "berinteraksi dengan akun Anda."
 
