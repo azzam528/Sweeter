@@ -1,6 +1,11 @@
 from datetime import datetime, timezone
 from bson import ObjectId
-from database import db
+from database import (
+    db,
+    has_block_relation,
+    get_all_blocked_relation_usernames,
+    get_muted_usernames,
+)
 
 
 def create_notification(
@@ -25,6 +30,10 @@ def create_notification(
 
     # Cegah self-notification
     if recipient == actor:
+        return None
+
+    # Cegah notifikasi jika terdapat relasi block antara recipient dan actor
+    if has_block_relation(recipient, actor):
         return None
 
     notif_type = str(notif_type).strip().lower()
@@ -137,19 +146,23 @@ def create_notification(
 
 
 def get_unread_count(username: str) -> int:
-    """Menghitung jumlah notifikasi yang belum dibaca untuk seorang pengguna."""
+    """Menghitung jumlah notifikasi yang belum dibaca untuk seorang pengguna (mengecualikan blocked & muted)."""
     if not username:
         return 0
-    return db.notifications.count_documents({
+    blocked_or_muted = get_all_blocked_relation_usernames(username) | set(get_muted_usernames(username))
+    filter_q = {
         'recipient': username,
         'is_read': False
-    })
+    }
+    if blocked_or_muted:
+        filter_q['actor'] = {'$nin': list(blocked_or_muted)}
+    return db.notifications.count_documents(filter_q)
 
 
 def get_user_notifications(username: str, cursor: str = None, limit: int = 20):
     """
     Mengambil daftar notifikasi pengguna dengan keyset cursor pagination,
-    diperkaya dengan profil actor dan status ketersediaan post.
+    diperkaya dengan profil actor dan status ketersediaan post (mengecualikan blocked & muted).
     """
     if not username:
         return {'notifications': [], 'next_cursor': None, 'has_more': False, 'unread_count': 0}
@@ -161,7 +174,10 @@ def get_user_notifications(username: str, cursor: str = None, limit: int = 20):
     except (TypeError, ValueError):
         limit = 20
 
+    blocked_or_muted = get_all_blocked_relation_usernames(username) | set(get_muted_usernames(username))
     query = {'recipient': username}
+    if blocked_or_muted:
+        query['actor'] = {'$nin': list(blocked_or_muted)}
     if cursor and ObjectId.is_valid(cursor):
         anchor = db.notifications.find_one({'_id': ObjectId(cursor)})
         if anchor:

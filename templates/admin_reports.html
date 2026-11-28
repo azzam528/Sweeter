@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dashboard Moderasi Admin | Sweeter</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"/>
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css"/>
+  <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            "surface-container-highest": "#e3e2e0", "surface-dim": "#dbdad8",
+            "background": "#faf9f7", "surface-container-high": "#e9e8e6",
+            "on-primary": "#ffffff", "on-secondary-fixed-variant": "#4e4542",
+            "on-primary-fixed": "#321112", "primary-fixed": "#ffdad9",
+            "on-surface-variant": "#514443", "on-error-container": "#93000a",
+            "on-tertiary-fixed": "#2f1314", "inverse-on-surface": "#f1f1ef",
+            "secondary-container": "#ecdcd8", "error": "#ba1a1a",
+            "tertiary-fixed": "#ffdad9", "outline": "#837373",
+            "on-secondary-fixed": "#211a18", "surface-tint": "#805252",
+            "inverse-primary": "#f3b8b7", "primary-fixed-dim": "#f3b8b7",
+            "on-background": "#1a1c1b", "inverse-surface": "#2f3130",
+            "on-tertiary-fixed-variant": "#613d3d", "secondary-fixed": "#eedfdb",
+            "on-error": "#ffffff", "surface-container-lowest": "#ffffff",
+            "on-tertiary": "#ffffff", "on-tertiary-container": "#c99a99",
+            "primary-container": "#583030", "surface": "#faf9f7",
+            "surface-container": "#efeeec", "tertiary-container": "#543232",
+            "surface-container-low": "#f4f3f1", "secondary": "#675c59",
+            "on-surface": "#1a1c1b", "tertiary-fixed-dim": "#ecbab9",
+            "on-secondary-container": "#6b605d", "secondary-fixed-dim": "#d2c3c0",
+            "surface-variant": "#e3e2e0", "surface-bright": "#faf9f7",
+            "on-primary-fixed-variant": "#653b3b", "primary": "#3e1b1b",
+            "error-container": "#ffdad6", "on-secondary": "#ffffff",
+            "outline-variant": "#d5c2c1", "on-primary-container": "#cf9897",
+            "tertiary": "#3b1d1d"
+          },
+          borderRadius: { DEFAULT: "0.25rem", lg: "0.5rem", xl: "0.75rem", full: "9999px" },
+          spacing: {
+            "gutter-desktop": "2rem", "space-md": "1rem", "margin-desktop": "2.5rem",
+            "margin-tablet": "1.5rem", "margin": "1rem", "space-xs": "0.25rem",
+            "gutter": "1.25rem", "space-2xl": "3rem", "space-xl": "2rem",
+            "space-lg": "1.5rem", "space-sm": "0.5rem"
+          },
+          fontFamily: {
+            "body-md": ["Manrope"], "headline-sm": ["Manrope"], "label-md": ["Manrope"]
+          }
+        }
+      }
+    };
+  </script>
+</head>
+
+<body class="bg-background font-body-md text-body-md text-on-surface antialiased">
+
+<!-- ===== HEADER ===== -->
+<header class="fixed top-0 left-0 right-0 z-40 bg-surface/80 backdrop-blur-xl shadow-[0_1px_8px_rgba(88,48,48,0.04)]">
+  <div class="h-16 max-w-7xl mx-auto px-4 md:px-margin-desktop flex items-center justify-between">
+    <div class="flex items-center gap-space-sm">
+      <a href="/" class="font-headline-sm text-headline-sm text-primary font-bold tracking-tight no-underline">Sweeter</a>
+      <span class="px-2 py-0.5 rounded bg-error-container text-on-error-container text-caption font-bold text-[11px] uppercase tracking-wider">Admin</span>
+    </div>
+    <div class="flex items-center gap-space-md">
+      <div class="flex items-center gap-space-sm">
+        <span class="font-label-md text-label-md text-on-surface hidden sm:inline-block">{{ user_info.profile_name | e }}</span>
+        <a href="/user/{{ user_info.username | e }}">
+          <img alt="Profile" class="w-8 h-8 rounded-full object-cover cursor-pointer"
+               src="/static/{{ user_info.profile_pic_real | e }}"
+               onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+        </a>
+      </div>
+      <form action="/sign_out" method="post" class="inline m-0">
+        <button type="submit" class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full hover:bg-surface-container border-0 bg-transparent cursor-pointer">
+          Sign Out
+        </button>
+      </form>
+    </div>
+  </div>
+</header>
+
+<div class="max-w-7xl mx-auto px-4 md:px-margin-desktop">
+  <!-- ===== LEFT SIDEBAR ===== -->
+  <aside class="hidden md:flex fixed top-16 left-[max(1rem,calc((100vw-80rem)/2+2.5rem))] h-[calc(100vh-4rem)] w-[240px] z-30 flex-col justify-between py-space-lg pr-space-md bg-transparent">
+    <div class="flex flex-col gap-space-lg">
+      <nav class="flex flex-col gap-space-xs">
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/">
+          <span class="material-symbols-outlined text-[22px]">home</span>
+          <span class="font-label-md text-label-md">Home</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/explore">
+          <span class="material-symbols-outlined text-[22px]">explore</span>
+          <span class="font-label-md text-label-md">Explore</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/notifications">
+          <span class="material-symbols-outlined text-[22px]">notifications</span>
+          <span class="font-label-md text-label-md">Notifications</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full bg-error-container text-on-error-container font-semibold transition-all no-underline" href="/admin/reports">
+          <span class="material-symbols-outlined text-[22px]">gavel</span>
+          <span class="font-label-md text-label-md">Moderation Reports</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/blocked">
+          <span class="material-symbols-outlined text-[22px]">block</span>
+          <span class="font-label-md text-label-md">Blocked Accounts</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/muted">
+          <span class="material-symbols-outlined text-[22px]">volume_off</span>
+          <span class="font-label-md text-label-md">Muted Accounts</span>
+        </a>
+      </nav>
+    </div>
+  </aside>
+
+  <!-- ===== MAIN CONTENT ===== -->
+  <div class="pl-0 md:pl-[264px] min-h-screen">
+    <main class="relative pt-20 bg-transparent max-w-[960px] mx-auto min-h-screen pb-16">
+
+      <!-- Header & Stats -->
+      <div class="mb-6">
+        <h1 class="font-headline-sm text-[26px] font-bold text-on-surface m-0 mb-1">Pusat Moderasi & Laporan Konten</h1>
+        <p class="font-body-md text-body-md text-secondary mb-6">
+          Kelola laporan pelanggaran komunitas secara objektif, aman, dan tercatat dalam jejak audit.
+        </p>
+
+        <!-- Metrics Summary Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3" id="stats-container">
+          <div class="bg-surface-container-lowest p-4 rounded-xl shadow-sm border border-outline-variant/30 text-center">
+            <span class="font-caption text-caption text-secondary block mb-1">Total Laporan</span>
+            <span class="font-headline-sm text-[22px] font-bold text-on-surface" id="stat-total">-</span>
+          </div>
+          <div class="bg-surface-container-lowest p-4 rounded-xl shadow-sm border border-outline-variant/30 text-center">
+            <span class="font-caption text-caption text-secondary block mb-1">Pending</span>
+            <span class="font-headline-sm text-[22px] font-bold text-error" id="stat-pending">-</span>
+          </div>
+          <div class="bg-surface-container-lowest p-4 rounded-xl shadow-sm border border-outline-variant/30 text-center">
+            <span class="font-caption text-caption text-secondary block mb-1">Under Review</span>
+            <span class="font-headline-sm text-[22px] font-bold text-primary" id="stat-under-review">-</span>
+          </div>
+          <div class="bg-surface-container-lowest p-4 rounded-xl shadow-sm border border-outline-variant/30 text-center">
+            <span class="font-caption text-caption text-secondary block mb-1">Resolved</span>
+            <span class="font-headline-sm text-[22px] font-bold text-green-700" id="stat-resolved">-</span>
+          </div>
+          <div class="bg-surface-container-lowest p-4 rounded-xl shadow-sm border border-outline-variant/30 text-center">
+            <span class="font-caption text-caption text-secondary block mb-1">Rejected</span>
+            <span class="font-headline-sm text-[22px] font-bold text-secondary" id="stat-rejected">-</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filters Toolbar -->
+      <div class="bg-surface-container-lowest rounded-xl p-4 shadow-sm border border-outline-variant/30 mb-6 flex flex-wrap items-center justify-between gap-4">
+        <!-- Status Tabs -->
+        <div class="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0" id="status-filter-tabs">
+          <button onclick="set_status_filter('all')" class="status-tab px-3.5 py-1.5 rounded-full font-label-sm text-label-sm bg-primary-container text-on-primary font-semibold border-0 cursor-pointer" data-status="all">Semua</button>
+          <button onclick="set_status_filter('pending')" class="status-tab px-3.5 py-1.5 rounded-full font-label-sm text-label-sm bg-surface-container text-on-surface border-0 cursor-pointer hover:bg-surface-container-high" data-status="pending">Pending</button>
+          <button onclick="set_status_filter('under_review')" class="status-tab px-3.5 py-1.5 rounded-full font-label-sm text-label-sm bg-surface-container text-on-surface border-0 cursor-pointer hover:bg-surface-container-high" data-status="under_review">Under Review</button>
+          <button onclick="set_status_filter('resolved')" class="status-tab px-3.5 py-1.5 rounded-full font-label-sm text-label-sm bg-surface-container text-on-surface border-0 cursor-pointer hover:bg-surface-container-high" data-status="resolved">Resolved</button>
+          <button onclick="set_status_filter('rejected')" class="status-tab px-3.5 py-1.5 rounded-full font-label-sm text-label-sm bg-surface-container text-on-surface border-0 cursor-pointer hover:bg-surface-container-high" data-status="rejected">Rejected</button>
+        </div>
+
+        <!-- Filter Dropdowns -->
+        <div class="flex items-center gap-3">
+          <select id="reason-filter" onchange="apply_filters()" class="bg-surface-container-low rounded-lg px-3 py-1.5 font-label-sm text-label-sm text-on-surface border border-outline-variant outline-none">
+            <option value="">Semua Kategori</option>
+            <option value="spam">Spam</option>
+            <option value="harassment">Harassment</option>
+            <option value="hate_speech">Hate Speech</option>
+            <option value="inappropriate_content">Inappropriate Content</option>
+            <option value="impersonation">Impersonation</option>
+            <option value="misinformation">Misinformation</option>
+            <option value="other">Other</option>
+          </select>
+          <select id="type-filter" onchange="apply_filters()" class="bg-surface-container-low rounded-lg px-3 py-1.5 font-label-sm text-label-sm text-on-surface border border-outline-variant outline-none">
+            <option value="">Semua Tipe Target</option>
+            <option value="post">Postingan</option>
+            <option value="comment">Komentar</option>
+            <option value="reply">Balasan</option>
+            <option value="user">Profil User</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Container Laporan -->
+      <div id="reports-list-container" class="flex flex-col gap-4">
+        <div class="text-center py-16 text-on-surface-variant">
+          <i class="fa fa-spinner fa-spin text-2xl text-primary mb-3"></i>
+          <p class="font-body-sm text-body-sm">Memuat daftar laporan...</p>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- Moderation Action & Status Modal -->
+<div id="admin-action-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+  <div class="bg-surface-container-lowest rounded-2xl w-full max-w-lg shadow-2xl border border-outline-variant/30 overflow-hidden flex flex-col max-h-[90vh]">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-surface-container-high bg-surface-container-low/30">
+      <h3 class="font-headline-sm text-headline-sm font-bold text-on-surface m-0" id="modal-report-title">Tindakan Moderasi</h3>
+      <button type="button" onclick="close_action_modal()" class="p-1 rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors border-0 bg-transparent cursor-pointer">
+        <span class="material-symbols-outlined text-[20px]">close</span>
+      </button>
+    </div>
+
+    <div class="p-6 overflow-y-auto flex-1 flex flex-col gap-4">
+      <input type="hidden" id="modal-report-id" value=""/>
+      <input type="hidden" id="modal-target-type" value=""/>
+      <input type="hidden" id="modal-target-id" value=""/>
+
+      <!-- Detail Singkat Laporan -->
+      <div class="p-3.5 bg-surface-container-low rounded-xl border border-outline-variant/40">
+        <div class="flex items-center justify-between mb-1">
+          <span class="font-caption text-caption text-secondary">Pelapor: <strong id="modal-reporter-name"></strong></span>
+          <span class="px-2 py-0.5 rounded-full text-[11px] font-bold" id="modal-report-status-badge"></span>
+        </div>
+        <div class="font-label-sm text-label-sm text-on-surface font-semibold mb-1">
+          Alasan: <span id="modal-report-reason"></span>
+        </div>
+        <p class="font-body-sm text-body-sm text-on-surface-variant whitespace-pre-wrap m-0" id="modal-report-desc"></p>
+      </div>
+
+      <!-- Pilih Tindakan -->
+      <div>
+        <label class="font-label-md text-label-md text-on-surface font-semibold block mb-2">Pilih Tindakan Moderasi</label>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2" id="action-options-group">
+          <label class="flex items-center gap-2 p-3 bg-surface-container-low rounded-xl border border-outline-variant/40 cursor-pointer hover:bg-surface-container transition-colors">
+            <input type="radio" name="mod_action" value="dismiss" class="text-primary"/>
+            <div>
+              <span class="font-label-sm text-label-sm font-semibold block text-on-surface">Tolak Laporan (Dismiss)</span>
+              <span class="font-caption text-caption text-secondary">Laporan tidak valid atau tidak melanggar</span>
+            </div>
+          </label>
+          <label class="flex items-center gap-2 p-3 bg-surface-container-low rounded-xl border border-outline-variant/40 cursor-pointer hover:bg-surface-container transition-colors">
+            <input type="radio" name="mod_action" value="resolve" class="text-primary"/>
+            <div>
+              <span class="font-label-sm text-label-sm font-semibold block text-on-surface">Tandai Selesai (Resolve)</span>
+              <span class="font-caption text-caption text-secondary">Ditangani tanpa menghapus konten</span>
+            </div>
+          </label>
+          <label class="flex items-center gap-2 p-3 bg-error-container/40 rounded-xl border border-error/30 cursor-pointer hover:bg-error-container/60 transition-colors" id="opt-remove-post">
+            <input type="radio" name="mod_action" value="remove_post" class="text-error"/>
+            <div>
+              <span class="font-label-sm text-label-sm font-semibold block text-error">Hapus Postingan</span>
+              <span class="font-caption text-caption text-secondary">Hapus permanen & bersihkan referensi</span>
+            </div>
+          </label>
+          <label class="flex items-center gap-2 p-3 bg-error-container/40 rounded-xl border border-error/30 cursor-pointer hover:bg-error-container/60 transition-colors" id="opt-remove-comment">
+            <input type="radio" name="mod_action" value="remove_comment" class="text-error"/>
+            <div>
+              <span class="font-label-sm text-label-sm font-semibold block text-error">Hapus Komentar</span>
+              <span class="font-caption text-caption text-secondary">Samarkan isi komentar (soft delete)</span>
+            </div>
+          </label>
+          <label class="flex items-center gap-2 p-3 bg-error-container/40 rounded-xl border border-error/30 cursor-pointer hover:bg-error-container/60 transition-colors" id="opt-suspend-user">
+            <input type="radio" name="mod_action" value="suspend_user" class="text-error"/>
+            <div>
+              <span class="font-label-sm text-label-sm font-semibold block text-error">Tangguhkan Akun (Suspend)</span>
+              <span class="font-caption text-caption text-secondary">Blokir akses login akun pengguna</span>
+            </div>
+          </label>
+          <label class="flex items-center gap-2 p-3 bg-surface-container-low rounded-xl border border-outline-variant/40 cursor-pointer hover:bg-surface-container transition-colors" id="opt-unsuspend-user">
+            <input type="radio" name="mod_action" value="unsuspend_user" class="text-primary"/>
+            <div>
+              <span class="font-label-sm text-label-sm font-semibold block text-on-surface">Pulihkan Akun (Unsuspend)</span>
+              <span class="font-caption text-caption text-secondary">Buka kembali akses akun</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- Alasan Tindakan / Catatan Moderasi -->
+      <div>
+        <label class="font-label-md text-label-md text-on-surface font-semibold block mb-1">Catatan Moderasi / Alasan Tindakan (Audit Log)</label>
+        <textarea id="modal-action-reason" rows="2" class="w-full bg-surface-container-low rounded-xl p-3 font-body-sm text-body-sm text-on-surface border border-outline-variant outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary-container resize-none" placeholder="Masukkan alasan tindakan moderasi ini..."></textarea>
+      </div>
+
+      <!-- Ubah Status Laporan Langsung -->
+      <div class="pt-2 border-t border-surface-container-high flex items-center justify-between">
+        <span class="font-caption text-caption text-secondary">Ubah status langsung tanpa aksi berat:</span>
+        <div class="flex items-center gap-1.5">
+          <button type="button" onclick="quick_status_change('under_review')" class="px-2.5 py-1 rounded-md bg-surface-container text-on-surface font-label-sm text-[12px] hover:bg-surface-container-high border-0 cursor-pointer">
+            Under Review
+          </button>
+          <button type="button" onclick="quick_status_change('pending')" class="px-2.5 py-1 rounded-md bg-surface-container text-on-surface font-label-sm text-[12px] hover:bg-surface-container-high border-0 cursor-pointer">
+            Pending
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="flex items-center justify-end gap-3 px-6 py-3 border-t border-surface-container-high bg-surface-container-low/30">
+      <button type="button" onclick="close_action_modal()" class="px-4 py-2 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container transition-colors border-0 bg-transparent cursor-pointer">
+        Batal
+      </button>
+      <button type="button" id="btn-submit-action" onclick="submit_moderation_action()" class="px-6 py-2 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-colors border-0 cursor-pointer shadow-sm">
+        Eksekusi Tindakan
+      </button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/myjs.js"></script>
+<script>
+  var currentStatusFilter = 'all';
+
+  function set_status_filter(status) {
+    currentStatusFilter = status;
+    $('.status-tab').removeClass('bg-primary-container text-on-primary font-semibold').addClass('bg-surface-container text-on-surface');
+    $('.status-tab[data-status="' + status + '"]').removeClass('bg-surface-container text-on-surface').addClass('bg-primary-container text-on-primary font-semibold');
+    load_reports();
+  }
+
+  function apply_filters() {
+    load_reports();
+  }
+
+  function load_reports() {
+    var reason = $('#reason-filter').val();
+    var targetType = $('#type-filter').val();
+
+    var params = {
+      status: currentStatusFilter,
+      reason: reason,
+      target_type: targetType
+    };
+
+    $.ajax({
+      type: 'GET',
+      url: '/api/admin/reports',
+      data: params,
+      success: function (res) {
+        // Render stats
+        if (res.stats) {
+          $('#stat-total').text(res.stats.total);
+          $('#stat-pending').text(res.stats.pending);
+          $('#stat-under-review').text(res.stats.under_review);
+          $('#stat-resolved').text(res.stats.resolved);
+          $('#stat-rejected').text(res.stats.rejected);
+        }
+
+        var $container = $('#reports-list-container');
+        $container.empty();
+
+        if (!res.reports || res.reports.length === 0) {
+          $container.html(`
+            <div class="bg-surface-container-lowest rounded-2xl p-12 text-center shadow-sm">
+              <span class="material-symbols-outlined text-[48px] text-outline mb-2">check_circle</span>
+              <h3 class="font-headline-sm text-[18px] font-bold text-on-surface mb-1">Tidak Ada Laporan yang Cocok</h3>
+              <p class="font-body-sm text-body-sm text-secondary max-w-sm mx-auto">
+                Semua laporan telah ditinjau atau tidak ada laporan dengan kriteria filter saat ini.
+              </p>
+            </div>
+          `);
+          return;
+        }
+
+        res.reports.forEach(function (report) {
+          var statusColor = 'bg-surface-container text-on-surface';
+          if (report.status === 'pending') statusColor = 'bg-error-container text-on-error-container';
+          else if (report.status === 'under_review') statusColor = 'bg-amber-100 text-amber-900';
+          else if (report.status === 'resolved') statusColor = 'bg-green-100 text-green-800';
+          else if (report.status === 'rejected') statusColor = 'bg-slate-200 text-slate-700';
+
+          var timeFormatted = report.created_at ? new Date(report.created_at).toLocaleString() : '-';
+
+          // Snapshot content preview
+          var snapshotPreview = '';
+          if (report.target_snapshot) {
+            if (report.target_type === 'user') {
+              snapshotPreview = `<strong>Profil:</strong> @${escapeHtml(report.target_snapshot.username || '')} (${escapeHtml(report.target_snapshot.profile_name || '')})`;
+            } else if (report.target_type === 'post') {
+              snapshotPreview = `<strong>Post author:</strong> @${escapeHtml(report.target_snapshot.author || '')} <br/> <em>"${escapeHtml(report.target_snapshot.comment || '')}"</em>`;
+            } else if (report.target_type === 'comment' || report.target_type === 'reply') {
+              snapshotPreview = `<strong>Komentar oleh:</strong> @${escapeHtml(report.target_snapshot.author || '')} <br/> <em>"${escapeHtml(report.target_snapshot.content || '')}"</em>`;
+            }
+          }
+
+          var notesHtml = '';
+          if (report.moderation_notes && report.moderation_notes.length > 0) {
+            notesHtml = `<div class="mt-3 pt-2 border-t border-surface-container text-caption text-secondary">
+              <strong>Riwayat Catatan:</strong>
+              ${report.moderation_notes.map(n => `<div class="mt-0.5">• <strong>${escapeHtml(n.admin)}</strong> (${new Date(n.timestamp).toLocaleTimeString()}): ${escapeHtml(n.note || '')}</div>`).join('')}
+            </div>`;
+          }
+
+          var card = `
+            <div class="bg-surface-container-lowest rounded-xl p-5 shadow-sm border border-outline-variant/30 flex flex-col gap-3" id="report-card-${report._id}">
+              <div class="flex items-center justify-between flex-wrap gap-2">
+                <div class="flex items-center gap-2">
+                  <span class="px-2.5 py-0.5 rounded-full text-caption font-bold ${statusColor} uppercase text-[11px]">${escapeHtml(report.status)}</span>
+                  <span class="px-2.5 py-0.5 rounded-full text-caption bg-surface-container-high text-on-surface font-semibold text-[11px]">${escapeHtml(report.reason_label || report.reason)}</span>
+                  <span class="font-caption text-caption text-secondary">Target: <strong class="text-on-surface">${escapeHtml(report.target_type)}</strong></span>
+                </div>
+                <span class="font-caption text-caption text-secondary">${timeFormatted}</span>
+              </div>
+
+              <!-- Reporter info & target -->
+              <div class="font-body-sm text-body-sm text-on-surface">
+                Pelapor: <a href="/user/${encodeURIComponent(report.reporter_id)}" class="font-semibold text-primary hover:underline">@${escapeHtml(report.reporter_id)}</a>
+                ${report.target_author ? ` · Pembuat Target: <a href="/user/${encodeURIComponent(report.target_author)}" class="font-semibold text-primary hover:underline">@${escapeHtml(report.target_author)}</a>` : ''}
+              </div>
+
+              <!-- Snapshot Preview -->
+              ${snapshotPreview ? `
+                <div class="p-3 bg-surface-container-low rounded-lg font-body-sm text-body-sm text-on-surface-variant border border-outline-variant/30 leading-relaxed">
+                  ${snapshotPreview}
+                </div>
+              ` : ''}
+
+              <!-- Description from reporter -->
+              ${report.description ? `
+                <p class="font-body-sm text-body-sm text-on-surface bg-surface-container-lowest p-2 rounded border border-outline-variant/20 italic">
+                  "Keterangan pelapor: ${escapeHtml(report.description)}"
+                </p>
+              ` : ''}
+
+              ${notesHtml}
+
+              <!-- Actions -->
+              <div class="flex items-center justify-between pt-2 border-t border-surface-container-high">
+                <div class="flex items-center gap-2">
+                  ${report.target_type === 'post' ? `
+                    <a href="/post/${encodeURIComponent(report.target_id)}" target="_blank" class="px-3 py-1 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm text-[12px] no-underline">
+                      <i class="fa fa-external-link mr-1"></i>Lihat Postingan
+                    </a>
+                  ` : ''}
+                  ${report.target_author ? `
+                    <a href="/user/${encodeURIComponent(report.target_author)}" target="_blank" class="px-3 py-1 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface font-label-sm text-[12px] no-underline">
+                      <i class="fa fa-user mr-1"></i>Lihat Profil
+                    </a>
+                  ` : ''}
+                </div>
+                <button onclick="open_action_modal('${report._id}', '${report.target_type}', '${report.target_id}', '${escapeHtml(report.reporter_id)}', '${escapeHtml(report.reason_label || report.reason)}', '${escapeHtml(report.description || '')}', '${report.status}')" class="px-4 py-1.5 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-colors border-0 cursor-pointer shadow-sm">
+                  Kelola Laporan
+                </button>
+              </div>
+            </div>
+          `;
+          $container.append(card);
+        });
+      },
+      error: function (xhr) {
+        $('#reports-list-container').html(`
+          <div class="p-8 bg-error-container text-on-error-container rounded-2xl text-center">
+            Akses ditolak atau gagal memuat laporan moderasi. Pastikan Anda memiliki hak akses Administrator.
+          </div>
+        `);
+      }
+    });
+  }
+
+  function open_action_modal(reportId, targetType, targetId, reporter, reason, desc, status) {
+    $('#modal-report-id').val(reportId);
+    $('#modal-target-type').val(targetType);
+    $('#modal-target-id').val(targetId);
+    $('#modal-reporter-name').text('@' + reporter);
+    $('#modal-report-reason').text(reason);
+    $('#modal-report-desc').text(desc ? 'Keterangan: "' + desc + '"' : 'Tidak ada keterangan tambahan.');
+    $('#modal-report-status-badge').text(status.toUpperCase()).removeClass().addClass('px-2 py-0.5 rounded-full text-[11px] font-bold ' + (status === 'pending' ? 'bg-error-container text-on-error-container' : 'bg-surface-container text-on-surface'));
+    $('#modal-action-reason').val('');
+    $('input[name="mod_action"]').prop('checked', false);
+
+    // Tampilkan opsi yang sesuai dengan tipe target
+    if (targetType === 'post') {
+      $('#opt-remove-post').show();
+      $('#opt-remove-comment').hide();
+    } else if (targetType === 'comment' || targetType === 'reply') {
+      $('#opt-remove-post').hide();
+      $('#opt-remove-comment').show();
+    } else {
+      $('#opt-remove-post').hide();
+      $('#opt-remove-comment').hide();
+    }
+
+    $('#admin-action-modal').removeClass('hidden');
+  }
+
+  function close_action_modal() {
+    $('#admin-action-modal').addClass('hidden');
+  }
+
+  function quick_status_change(newStatus) {
+    var reportId = $('#modal-report-id').val();
+    var notes = $('#modal-action-reason').val();
+    if (!reportId) return;
+
+    $.ajax({
+      type: 'POST',
+      url: '/api/admin/reports/' + encodeURIComponent(reportId) + '/status',
+      contentType: 'application/json',
+      data: JSON.stringify({ status: newStatus, notes: notes }),
+      success: function (res) {
+        close_action_modal();
+        load_reports();
+      },
+      error: function (xhr) {
+        alert(xhr.responseJSON ? xhr.responseJSON.msg : 'Gagal memperbarui status');
+      }
+    });
+  }
+
+  function submit_moderation_action() {
+    var reportId = $('#modal-report-id').val();
+    var action = $('input[name="mod_action"]:checked').val();
+    var reason = $('#modal-action-reason').val();
+
+    if (!action) {
+      alert('Pilih salah satu tindakan moderasi terlebih dahulu.');
+      return;
+    }
+
+    var $btn = $('#btn-submit-action');
+    $btn.prop('disabled', true).text('Memproses...');
+
+    $.ajax({
+      type: 'POST',
+      url: '/api/admin/reports/' + encodeURIComponent(reportId) + '/action',
+      contentType: 'application/json',
+      data: JSON.stringify({ action: action, reason: reason }),
+      success: function (res) {
+        $btn.prop('disabled', false).text('Eksekusi Tindakan');
+        close_action_modal();
+        load_reports();
+      },
+      error: function (xhr) {
+        $btn.prop('disabled', false).text('Eksekusi Tindakan');
+        alert(xhr.responseJSON ? xhr.responseJSON.msg : 'Gagal mengeksekusi tindakan moderasi');
+      }
+    });
+  }
+
+  $(document).ready(function () {
+    load_reports();
+  });
+</script>
+
+</body>
+</html>

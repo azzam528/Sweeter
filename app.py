@@ -39,6 +39,13 @@ from database import (
     extract_hashtags,
     get_trending_hashtags,
     get_suggested_users,
+    is_blocked,
+    has_block_relation,
+    get_blocked_usernames,
+    get_blocking_usernames,
+    get_all_blocked_relation_usernames,
+    is_muted,
+    get_muted_usernames,
 )
 from notifications import (
     create_notification,
@@ -108,7 +115,7 @@ app.config["SECRET_KEY"] = SECRET_KEY
 def get_current_user_from_token():
     """
     Mengambil dan memvalidasi token JWT dari cookie 'mytoken'.
-    Mengembalikan payload dict jika valid, atau None jika tidak valid/kadaluarsa/hilang.
+    Mengembalikan payload dict jika valid, atau None jika tidak valid/kadaluarsa/hilang/suspended.
     """
     token_receive = request.cookies.get('mytoken')
     if not token_receive:
@@ -119,9 +126,39 @@ def get_current_user_from_token():
             SECRET_KEY,
             algorithms=['HS256']
         )
+        username = payload.get('id')
+        if username:
+            user_doc = db.users.find_one({'username': username}, {'is_suspended': 1})
+            if user_doc and user_doc.get('is_suspended') is True:
+                return None
         return payload
     except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError, Exception):
         return None
+
+
+ADMIN_USERS_ENV = os.getenv("ADMIN_USERS", "admin").lower()
+ADMIN_USERNAMES = {u.strip() for u in ADMIN_USERS_ENV.split(",") if u.strip()}
+
+
+def is_admin_user(username: str) -> bool:
+    """
+    Memeriksa otorisasi platform administrator secara aman pada sisi server:
+    1. Konfigurasi env var ADMIN_USERS (misal: 'admin,azzam')
+    2. Flag database: is_admin: True atau role: 'admin' pada koleksi db.users
+    Tidak pernah mempercayai parameter input atau klaim sepihak dari frontend.
+    """
+    if not username or not isinstance(username, str):
+        return False
+    username_clean = username.strip()
+    if username_clean.lower() in ADMIN_USERNAMES:
+        return True
+    user_doc = db.users.find_one(
+        {"username": username_clean},
+        {"is_admin": 1, "role": 1, "is_suspended": 1}
+    )
+    if not user_doc or user_doc.get("is_suspended") is True:
+        return False
+    return bool(user_doc.get("is_admin") is True or user_doc.get("role") == "admin")
 
 
 # Lanjutkan dengan seluruh route lama kamu di bawah ini.
@@ -192,7 +229,12 @@ def user(username):
             return render_template('404.html', username=username, current_user=current_user), 404
 
         status = (username == current_username)
-        post_count = db.posts.count_documents({'username': username})
+        is_blocked_by_me = is_blocked(current_username, username) if not status else False
+        is_blocking_me = is_blocked(username, current_username) if not status else False
+        is_muted_by_me = is_muted(current_username, username) if not status else False
+        is_admin = is_admin_user(current_username)
+
+        post_count = 0 if (is_blocked_by_me or is_blocking_me) else db.posts.count_documents({'username': username})
         is_following = bool(db.follows.find_one({'follower': current_username, 'following': username}))
         follower_count = db.follows.count_documents({'following': username})
         following_count = db.follows.count_documents({'follower': username})
@@ -204,7 +246,11 @@ def user(username):
             post_count=post_count,
             is_following=is_following,
             follower_count=follower_count,
-            following_count=following_count
+            following_count=following_count,
+            is_blocked_by_me=is_blocked_by_me,
+            is_blocking_me=is_blocking_me,
+            is_muted_by_me=is_muted_by_me,
+            is_admin=is_admin
         )
     except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))
@@ -254,6 +300,14 @@ def sign_in():
         }
     )
     if result:
+        if result.get("is_suspended") is True:
+            return jsonify(
+                {
+                    "result": "fail",
+                    "msg": "Akun Anda telah ditangguhkan (suspended) oleh administrator karena pelanggaran aturan komunitas.",
+                }
+            ), 403
+
         payload = {
             "id": username_receive,
             # token berlaku 24 jam (menggunakan datetime timezone UTC standar)
@@ -605,11 +659,19 @@ def _get_user_joined_community_ids(username: str) -> list:
 
 def _user_can_access_post(post_doc: dict, current_username: str = None) -> bool:
     """
-    Memastikan postingan dari komunitas private tidak dapat diakses non-anggota.
+    Memastikan postingan dapat diakses oleh current_username:
+    1. Postingan dari akun yang memiliki relasi block (diblokir atau memblokir) tidak dapat diakses.
+    2. Postingan dari komunitas private tidak dapat diakses non-anggota.
     Postingan publik dan komunitas public selalu dapat diakses.
     """
     if not post_doc:
         return False
+
+    post_author = post_doc.get("username")
+    if current_username and post_author:
+        if has_block_relation(current_username, post_author):
+            return False
+
     if post_doc.get("community_visibility") != "private":
         return True
     cid = post_doc.get("community_id")
@@ -772,7 +834,7 @@ def posting():
         }), 500    
     
     
-def enrich_posts_metadata(posts, current_username):
+def enrich_posts_metadata(posts, current_username, is_profile_view_for=None):
     """
     Memperkaya daftar dokumen post dengan:
     1. Batch comments count
@@ -920,6 +982,37 @@ def enrich_posts_metadata(posts, current_username):
         else:
             post['original_post'] = None
 
+    # Filter konsistensi visibilitas untuk akun yang diblokir & di-mute
+    if current_username:
+        blocked_related = get_all_blocked_relation_usernames(current_username)
+        muted_users = set(get_muted_usernames(current_username))
+        cleaned_posts = []
+        for post in posts:
+            p_author = post.get('username')
+            # Jika author postingan ini diblokir / memblokir, lewati
+            if p_author in blocked_related:
+                continue
+
+            # Jika author di-mute, hanya sembunyikan jika BUKAN sedang melihat profil spesifik author tersebut
+            if p_author in muted_users and p_author != is_profile_view_for:
+                continue
+
+            # Jika merupakan repost, periksa author postingan asli
+            if post.get('post_type') == 'repost':
+                orig_p = post.get('original_post')
+                if orig_p:
+                    orig_author = orig_p.get('username')
+                    if orig_author in blocked_related or (orig_author in muted_users and orig_author != is_profile_view_for):
+                        continue
+            # Jika merupakan quote, samarkan konten asli jika author asli diblokir
+            elif post.get('post_type') == 'quote':
+                orig_p = post.get('original_post')
+                if orig_p and orig_p.get('username') in blocked_related:
+                    post['original_post'] = {'_id': orig_p.get('_id'), 'is_deleted': True}
+
+            cleaned_posts.append(post)
+        posts = cleaned_posts
+
     return posts
 
 
@@ -962,17 +1055,33 @@ def get_posts():
 
     # 2. Penentuan filter pengguna (Author Filter) & perlindungan privasi komunitas private
     visibility_filter = _private_post_visibility_filter(current_username)
+    blocked_related = get_all_blocked_relation_usernames(current_username)
+    muted_users = set(get_muted_usernames(current_username))
+    excluded_authors = blocked_related | muted_users
+
     if username_receive:
-        # Mode Profil: hanya postingan milik pengguna yang diminta (tanpa membocorkan post komunitas private)
+        # Mode Profil: jika terdapat relasi block, isolasi postingan (jangan tampilkan)
+        if has_block_relation(current_username, username_receive):
+            return jsonify({
+                'result': 'success',
+                'msg': 'Postingan tidak tersedia karena pembatasan blokir',
+                'posts': [],
+                'next_cursor': None,
+                'has_more': False,
+                'tab': 'profile'
+            }), 200
         query = {'$and': [{'username': username_receive}, visibility_filter]}
     elif tab in ['following', 'timeline']:
-        # Mode Personalized Timeline: postingan diri sendiri + akun yang diikuti
+        # Mode Personalized Timeline: postingan diri sendiri + akun yang diikuti (tanpa yang diblokir atau dimute)
         following_users = db.follows.distinct('following', {'follower': current_username})
-        allowed_authors = [current_username] + following_users
+        allowed_authors = [u for u in ([current_username] + following_users) if u not in excluded_authors]
         query = {'$and': [{'username': {'$in': allowed_authors}}, visibility_filter]}
     else:
-        # Mode Explore / All / Default: postingan publik (dan komunitas private yang diikuti)
-        query = visibility_filter
+        # Mode Explore / All / Default: postingan publik (tanpa akun yang diblokir atau dimute)
+        if excluded_authors:
+            query = {'$and': [{'username': {'$nin': list(excluded_authors)}}, visibility_filter]}
+        else:
+            query = visibility_filter
 
     # 3. Penanganan Cursor Pagination (Keyset Pagination)
     if cursor:
@@ -1005,7 +1114,7 @@ def get_posts():
     posts = list(db.posts.find(query).sort([('date', -1), ('_id', -1)]).limit(limit))
 
     # 5. Memperkaya metadata postingan tanpa N+1 query loop
-    posts = enrich_posts_metadata(posts, current_username)
+    posts = enrich_posts_metadata(posts, current_username, is_profile_view_for=username_receive)
 
     has_more = (len(posts) == limit)
     next_cursor = str(posts[-1]['_id']) if has_more else None
@@ -1147,7 +1256,13 @@ def create_comment():
     if not _user_can_access_post(target_post, username):
         return jsonify({
             'result': 'fail',
-            'msg': 'Anda tidak memiliki akses ke postingan komunitas privat ini.'
+            'msg': 'Anda tidak memiliki akses ke postingan ini.'
+        }), 403
+
+    if has_block_relation(username, target_post.get('username')):
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Cannot comment on this post due to block restrictions'
         }), 403
 
     # 2. Validasi konten komentar
@@ -1185,6 +1300,12 @@ def create_comment():
                 'result': 'fail',
                 'msg': 'Parent comment does not belong to the specified post'
             }), 400
+
+        if has_block_relation(username, parent_comment.get('username')):
+            return jsonify({
+                'result': 'fail',
+                'msg': 'Cannot reply to this comment due to block restrictions'
+            }), 403
 
         parent_comment_id = str(parent_comment['_id'])
 
@@ -1281,10 +1402,13 @@ def get_comments():
             'msg': 'Anda tidak memiliki akses ke postingan komunitas privat ini.'
         }), 403
 
-    # 2. Ambil komentar terurut ascending berdasarkan waktu pembuatan
+    # 2. Ambil komentar terurut ascending berdasarkan waktu pembuatan (sembunyikan dari pengguna yang diblokir)
+    blocked_related = get_all_blocked_relation_usernames(current_user) if current_user else set()
     comments_cursor = db.comments.find({'post_id': str(post_id_receive)}).sort('created_at', 1)
     comments_list = []
     for c in comments_cursor:
+        if c.get('username') in blocked_related:
+            continue
         is_deleted = bool(c.get('is_deleted', False))
         is_mine = (c.get('username') == current_user)
         # Sembunyikan konten asli jika komentar telah dihapus (soft delete)
@@ -1449,7 +1573,14 @@ def follow_user(target_username=None):
     if not target_user:
         return jsonify({'result': 'fail', 'msg': 'User not found'}), 404
 
-    # Aturan 3: Cegah duplicate follow (race-safe & idempotent)
+    # Aturan 3: Cegah follow jika terdapat relasi block
+    if has_block_relation(current_username, target):
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Cannot follow this user due to block restrictions'
+        }), 403
+
+    # Aturan 4: Cegah duplicate follow (race-safe & idempotent)
     existing = db.follows.find_one({'follower': current_username, 'following': target})
     if existing:
         follower_count = db.follows.count_documents({'following': target})
@@ -1593,8 +1724,12 @@ def get_user_followers_api(username):
         except Exception:
             current_username = None
 
+    if current_username and has_block_relation(current_username, username):
+        return jsonify({'result': 'fail', 'msg': 'Cannot access followers list due to block restrictions'}), 403
+
+    blocked_related = get_all_blocked_relation_usernames(current_username) if current_username else set()
     follow_docs = list(db.follows.find({'following': username}).sort('created_at', -1))
-    follower_usernames = [d['follower'] for d in follow_docs]
+    follower_usernames = [d['follower'] for d in follow_docs if d['follower'] not in blocked_related]
 
     user_docs = {
         u['username']: u
@@ -1649,8 +1784,12 @@ def get_user_following_api(username):
         except Exception:
             current_username = None
 
+    if current_username and has_block_relation(current_username, username):
+        return jsonify({'result': 'fail', 'msg': 'Cannot access following list due to block restrictions'}), 403
+
+    blocked_related = get_all_blocked_relation_usernames(current_username) if current_username else set()
     follow_docs = list(db.follows.find({'follower': username}).sort('created_at', -1))
-    following_usernames = [d['following'] for d in follow_docs]
+    following_usernames = [d['following'] for d in follow_docs if d['following'] not in blocked_related]
 
     user_docs = {
         u['username']: u
@@ -1698,6 +1837,9 @@ def user_followers_page(username):
         if not user_info:
             return render_template('404.html', username=username, current_user=current_user), 404
 
+        if has_block_relation(current_username, username):
+            return redirect(url_for('user', username=username))
+
         follower_count = db.follows.count_documents({'following': username})
         following_count = db.follows.count_documents({'follower': username})
         is_following = bool(db.follows.find_one({'follower': current_username, 'following': username}))
@@ -1728,6 +1870,9 @@ def user_following_page(username):
         if not user_info:
             return render_template('404.html', username=username, current_user=current_user), 404
 
+        if has_block_relation(current_username, username):
+            return redirect(url_for('user', username=username))
+
         follower_count = db.follows.count_documents({'following': username})
         following_count = db.follows.count_documents({'follower': username})
         is_following = bool(db.follows.find_one({'follower': current_username, 'following': username}))
@@ -1744,6 +1889,931 @@ def user_following_page(username):
         )
     except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))  
+
+
+
+# ==========================================
+# BLOCK, MUTE, REPORT & MODERATION SUBSYSTEM
+# ==========================================
+
+VALID_REPORT_REASONS = {
+    'spam': 'Spam',
+    'harassment': 'Harassment or Bullying',
+    'hate_speech': 'Hate Speech',
+    'inappropriate_content': 'Inappropriate Content',
+    'impersonation': 'Impersonation',
+    'misinformation': 'Misinformation',
+    'other': 'Other'
+}
+
+
+@app.route('/api/block', methods=['POST'])
+@app.route('/api/users/<target_username>/block', methods=['POST'])
+def block_user(target_username=None):
+    """
+    Endpoint untuk memblokir pengguna lain.
+    Ketika User A memblokir User B:
+    - User B tidak dapat mengikuti User A.
+    - User A dan User B otomatis saling berhenti mengikuti jika sebelumnya memiliki relasi follow.
+    - Konten, interaksi, profil, komentar, dan notifikasi saling terisolasi.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    target = _extract_target_username(target_username)
+    if not target:
+        return jsonify({'result': 'fail', 'msg': 'Target username is required'}), 400
+
+    if current_username == target:
+        return jsonify({'result': 'fail', 'msg': 'You cannot block yourself'}), 400
+
+    target_user = db.users.find_one({'username': target})
+    if not target_user:
+        return jsonify({'result': 'fail', 'msg': 'User not found'}), 404
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        db.blocks.insert_one({
+            'blocker': current_username,
+            'blocked': target,
+            'created_at': now_iso
+        })
+    except DuplicateKeyError:
+        pass  # Idempotent
+
+    # Otomatis saling berhenti mengikuti (mutual unfollow)
+    db.follows.delete_many({
+        '$or': [
+            {'follower': current_username, 'following': target},
+            {'follower': target, 'following': current_username}
+        ]
+    })
+
+    return jsonify({
+        'result': 'success',
+        'msg': f'Successfully blocked @{target}',
+        'target_username': target,
+        'is_blocked': True
+    }), 200
+
+
+@app.route('/api/unblock', methods=['POST'])
+@app.route('/api/users/<target_username>/unblock', methods=['POST'])
+def unblock_user(target_username=None):
+    """
+    Endpoint untuk membuka blokir (unblock) pengguna lain.
+    Unblock tidak otomatis mengembalikan relasi follow sebelumnya.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    target = _extract_target_username(target_username)
+    if not target:
+        return jsonify({'result': 'fail', 'msg': 'Target username is required'}), 400
+
+    if current_username == target:
+        return jsonify({'result': 'fail', 'msg': 'You cannot unblock yourself'}), 400
+
+    db.blocks.delete_one({'blocker': current_username, 'blocked': target})
+
+    return jsonify({
+        'result': 'success',
+        'msg': f'Successfully unblocked @{target}',
+        'target_username': target,
+        'is_blocked': False
+    }), 200
+
+
+@app.route('/api/blocked_users', methods=['GET'])
+def get_blocked_users_api():
+    """Mengambil daftar akun yang diblokir oleh pengguna aktif."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    block_docs = list(db.blocks.find({'blocker': current_username}).sort('created_at', -1))
+    blocked_usernames = [b['blocked'] for b in block_docs]
+
+    user_docs = {
+        u['username']: u
+        for u in db.users.find({'username': {'$in': blocked_usernames}}, {'password': 0})
+    }
+
+    blocked_list = []
+    for b in block_docs:
+        uname = b['blocked']
+        u = user_docs.get(uname)
+        blocked_list.append({
+            'username': uname,
+            'profile_name': u.get('profile_name', uname) if u else uname,
+            'profile_pic_real': u.get('profile_pic_real', 'profile_pics/profile_placeholder.png') if u else 'profile_pics/profile_placeholder.png',
+            'profile_info': u.get('profile_info', '') if u else '',
+            'blocked_at': b.get('created_at', '')
+        })
+
+    return jsonify({
+        'result': 'success',
+        'total': len(blocked_list),
+        'blocked_users': blocked_list
+    }), 200
+
+
+@app.route('/blocked', methods=['GET'])
+def blocked_users_page():
+    """Halaman pengaturan manajemen akun yang diblokir."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return redirect(url_for('login'))
+
+    current_username = payload.get('id')
+    user_info = db.users.find_one({'username': current_username})
+    if not user_info:
+        return redirect(url_for('login'))
+
+    unread_count = get_unread_count(current_username)
+    is_admin = is_admin_user(current_username)
+    return render_template(
+        'blocked_users.html',
+        user_info=user_info,
+        unread_count=unread_count,
+        is_admin=is_admin
+    )
+
+
+@app.route('/api/mute', methods=['POST'])
+@app.route('/api/users/<target_username>/mute', methods=['POST'])
+def mute_user(target_username=None):
+    """
+    Endpoint untuk me-mute pengguna lain.
+    Mute menyembunyikan postingan, repost, quote, notifikasi dari timeline tanpa mengubah relasi follow.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    target = _extract_target_username(target_username)
+    if not target:
+        return jsonify({'result': 'fail', 'msg': 'Target username is required'}), 400
+
+    if current_username == target:
+        return jsonify({'result': 'fail', 'msg': 'You cannot mute yourself'}), 400
+
+    target_user = db.users.find_one({'username': target})
+    if not target_user:
+        return jsonify({'result': 'fail', 'msg': 'User not found'}), 404
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        db.mutes.insert_one({
+            'muter': current_username,
+            'muted': target,
+            'created_at': now_iso
+        })
+    except DuplicateKeyError:
+        pass  # Idempotent
+
+    return jsonify({
+        'result': 'success',
+        'msg': f'Successfully muted @{target}',
+        'target_username': target,
+        'is_muted': True
+    }), 200
+
+
+@app.route('/api/unmute', methods=['POST'])
+@app.route('/api/users/<target_username>/unmute', methods=['POST'])
+def unmute_user(target_username=None):
+    """
+    Endpoint untuk membuka mute (unmute) pengguna lain.
+    Unmute mengembalikan visibilitas konten pengguna tanpa mengubah relasi follow atau status block.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    target = _extract_target_username(target_username)
+    if not target:
+        return jsonify({'result': 'fail', 'msg': 'Target username is required'}), 400
+
+    if current_username == target:
+        return jsonify({'result': 'fail', 'msg': 'You cannot unmute yourself'}), 400
+
+    db.mutes.delete_one({'muter': current_username, 'muted': target})
+
+    return jsonify({
+        'result': 'success',
+        'msg': f'Successfully unmuted @{target}',
+        'target_username': target,
+        'is_muted': False
+    }), 200
+
+
+@app.route('/api/muted_users', methods=['GET'])
+def get_muted_users_api():
+    """Mengambil daftar akun yang di-mute oleh pengguna aktif."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    mute_docs = list(db.mutes.find({'muter': current_username}).sort('created_at', -1))
+    muted_usernames = [m['muted'] for m in mute_docs]
+
+    user_docs = {
+        u['username']: u
+        for u in db.users.find({'username': {'$in': muted_usernames}}, {'password': 0})
+    }
+
+    muted_list = []
+    for m in mute_docs:
+        uname = m['muted']
+        u = user_docs.get(uname)
+        muted_list.append({
+            'username': uname,
+            'profile_name': u.get('profile_name', uname) if u else uname,
+            'profile_pic_real': u.get('profile_pic_real', 'profile_pics/profile_placeholder.png') if u else 'profile_pics/profile_placeholder.png',
+            'profile_info': u.get('profile_info', '') if u else '',
+            'muted_at': m.get('created_at', '')
+        })
+
+    return jsonify({
+        'result': 'success',
+        'total': len(muted_list),
+        'muted_users': muted_list
+    }), 200
+
+
+@app.route('/muted', methods=['GET'])
+def muted_users_page():
+    """Halaman pengaturan manajemen akun yang di-mute."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return redirect(url_for('login'))
+
+    current_username = payload.get('id')
+    user_info = db.users.find_one({'username': current_username})
+    if not user_info:
+        return redirect(url_for('login'))
+
+    unread_count = get_unread_count(current_username)
+    is_admin = is_admin_user(current_username)
+    return render_template(
+        'muted_users.html',
+        user_info=user_info,
+        unread_count=unread_count,
+        is_admin=is_admin
+    )
+
+
+@app.route('/api/users/<target_username>/relationship', methods=['GET'])
+def user_relationship_status(target_username=None):
+    """
+    Memeriksa status interaksi sosial antara pengguna saat ini dan target:
+    - is_following
+    - is_followed_by
+    - is_blocked_by_me
+    - is_blocking_me
+    - is_muted_by_me
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    target = _extract_target_username(target_username)
+    if not target:
+        return jsonify({'result': 'fail', 'msg': 'Target username is required'}), 400
+
+    target_user = db.users.find_one({'username': target})
+    if not target_user:
+        return jsonify({'result': 'fail', 'msg': 'User not found'}), 404
+
+    is_following_val = is_following(current_username, target)
+    is_followed_by_val = is_following(target, current_username)
+    is_blocked_by_me_val = is_blocked(current_username, target)
+    is_blocking_me_val = is_blocked(target, current_username)
+    is_muted_by_me_val = is_muted(current_username, target)
+
+    return jsonify({
+        'result': 'success',
+        'current_username': current_username,
+        'target_username': target,
+        'is_following': is_following_val,
+        'is_followed_by': is_followed_by_val,
+        'is_blocked_by_me': is_blocked_by_me_val,
+        'is_blocking_me': is_blocking_me_val,
+        'is_muted_by_me': is_muted_by_me_val
+    }), 200
+
+
+@app.route('/api/reports', methods=['POST'])
+def submit_report():
+    """
+    Endpoint pelaporan konten atau profil yang melanggar aturan komunitas:
+    - Target: user, post, comment, reply
+    - Alasan: spam, harassment, hate_speech, inappropriate_content, impersonation, misinformation, other
+    - Validasi keberadaan target, batas panjang deskripsi, proteksi duplikasi, dan keamanan XSS.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+
+    # Ekstraksi input dari JSON atau Form-data
+    target_type = None
+    target_id = None
+    reason = None
+    description = ""
+
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        target_type = data.get('target_type')
+        target_id = data.get('target_id')
+        reason = data.get('reason')
+        description = data.get('description', '')
+    else:
+        target_type = request.form.get('target_type')
+        target_id = request.form.get('target_id')
+        reason = request.form.get('reason')
+        description = request.form.get('description', '')
+
+    target_type = str(target_type).strip().lower() if target_type else ''
+    target_id = str(target_id).strip() if target_id else ''
+    reason = str(reason).strip().lower() if reason else ''
+    description = str(description).strip() if description else ''
+
+    # Validasi kelengkapan parameter
+    if not target_type or target_type not in ('user', 'post', 'comment', 'reply'):
+        return jsonify({'result': 'fail', 'msg': 'Invalid target_type. Must be user, post, comment, or reply'}), 400
+
+    if not target_id:
+        return jsonify({'result': 'fail', 'msg': 'target_id is required'}), 400
+
+    if reason not in VALID_REPORT_REASONS:
+        return jsonify({
+            'result': 'fail',
+            'msg': f'Invalid report reason. Must be one of: {", ".join(VALID_REPORT_REASONS.keys())}'
+        }), 400
+
+    if len(description) > 1000:
+        return jsonify({'result': 'fail', 'msg': 'Description exceeds maximum length of 1000 characters'}), 400
+
+    # Validasi keberadaan target & cegah pelaporan terhadap konten diri sendiri
+    target_author = None
+    snapshot = {}
+
+    if target_type == 'user':
+        if target_id == current_username:
+            return jsonify({'result': 'fail', 'msg': 'You cannot report yourself'}), 400
+        target_user = db.users.find_one({'username': target_id})
+        if not target_user:
+            return jsonify({'result': 'fail', 'msg': 'Target user not found'}), 404
+        target_author = target_id
+        snapshot = {
+            'username': target_id,
+            'profile_name': target_user.get('profile_name', target_id),
+            'profile_info': target_user.get('profile_info', '')
+        }
+    elif target_type == 'post':
+        if not ObjectId.is_valid(target_id):
+            return jsonify({'result': 'fail', 'msg': 'Invalid post ID format'}), 400
+        target_post = db.posts.find_one({'_id': ObjectId(target_id)})
+        if not target_post:
+            return jsonify({'result': 'fail', 'msg': 'Target post not found'}), 404
+        if target_post.get('username') == current_username:
+            return jsonify({'result': 'fail', 'msg': 'You cannot report your own post'}), 400
+        target_author = target_post.get('username')
+        snapshot = {
+            'author': target_author,
+            'comment': target_post.get('comment', ''),
+            'post_type': target_post.get('post_type', 'original'),
+            'date': target_post.get('date', ''),
+            'image_count': len(target_post.get('images') or [])
+        }
+    elif target_type in ('comment', 'reply'):
+        if not ObjectId.is_valid(target_id):
+            return jsonify({'result': 'fail', 'msg': 'Invalid comment ID format'}), 400
+        target_comment = db.comments.find_one({'_id': ObjectId(target_id)})
+        if not target_comment:
+            return jsonify({'result': 'fail', 'msg': 'Target comment not found'}), 404
+        if target_comment.get('username') == current_username:
+            return jsonify({'result': 'fail', 'msg': 'You cannot report your own comment'}), 400
+        target_author = target_comment.get('username')
+        snapshot = {
+            'author': target_author,
+            'post_id': str(target_comment.get('post_id')),
+            'parent_comment_id': str(target_comment.get('parent_comment_id')) if target_comment.get('parent_comment_id') else None,
+            'content': target_comment.get('content', ''),
+            'created_at': target_comment.get('created_at', '')
+        }
+
+    # Pencegahan laporan duplikat yang sedang aktif
+    existing_report = db.reports.find_one({
+        'reporter_id': current_username,
+        'target_type': target_type,
+        'target_id': target_id,
+        'status': {'$in': ['pending', 'under_review']}
+    })
+    if existing_report:
+        return jsonify({
+            'result': 'fail',
+            'msg': 'You have already submitted a report for this target that is currently under review.'
+        }), 409
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    report_doc = {
+        'reporter_id': current_username,
+        'target_type': target_type,
+        'target_id': target_id,
+        'target_author': target_author,
+        'target_snapshot': snapshot,
+        'reason': reason,
+        'reason_label': VALID_REPORT_REASONS[reason],
+        'description': description,
+        'status': 'pending',  # pending, under_review, resolved, rejected
+        'created_at': now_iso,
+        'updated_at': now_iso,
+        'assigned_admin': None,
+        'moderation_notes': [],
+        'resolved_by': None,
+        'resolved_at': None
+    }
+
+    insert_res = db.reports.insert_one(report_doc)
+    return jsonify({
+        'result': 'success',
+        'msg': 'Report submitted successfully. Thank you for helping keep Sweeter safe.',
+        'report_id': str(insert_res.inserted_id)
+    }), 201
+
+
+# ==========================================
+# ADMIN MODERATION DASHBOARD & ACTIONS
+# ==========================================
+
+@app.route('/admin/reports', methods=['GET'])
+def admin_reports_page():
+    """Halaman Dashboard Moderasi Khusus Administrator."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return redirect(url_for('login'))
+
+    current_username = payload.get('id')
+    if not is_admin_user(current_username):
+        return render_template('404.html', username=current_username), 403
+
+    user_info = db.users.find_one({'username': current_username})
+    unread_count = get_unread_count(current_username)
+    return render_template(
+        'admin_reports.html',
+        user_info=user_info,
+        unread_count=unread_count,
+        is_admin=True
+    )
+
+
+@app.route('/api/admin/reports', methods=['GET'])
+def get_admin_reports_api():
+    """
+    API JSON untuk mengambil daftar laporan dan metrik moderasi bagi Administrator.
+    Memeriksa otorisasi administrator secara ketat pada sisi server.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    if not is_admin_user(current_username):
+        return jsonify({'result': 'fail', 'msg': 'Administrator privileges required'}), 403
+
+    status_filter = request.args.get('status', 'all').strip().lower()
+    reason_filter = request.args.get('reason', '').strip().lower()
+    target_type_filter = request.args.get('target_type', '').strip().lower()
+    limit_raw = request.args.get('limit', '50').strip()
+    page_raw = request.args.get('page', '1').strip()
+
+    try:
+        limit = max(1, min(int(limit_raw), 100))
+    except ValueError:
+        limit = 50
+
+    try:
+        page = max(1, int(page_raw))
+    except ValueError:
+        page = 1
+
+    skip = (page - 1) * limit
+
+    query = {}
+    if status_filter and status_filter != 'all':
+        query['status'] = status_filter
+    if reason_filter:
+        query['reason'] = reason_filter
+    if target_type_filter:
+        query['target_type'] = target_type_filter
+
+    total_count = db.reports.count_documents(query)
+    reports_cursor = db.reports.find(query).sort('created_at', -1).skip(skip).limit(limit)
+
+    reports_list = []
+    for r in reports_cursor:
+        r_id = str(r['_id'])
+        r['_id'] = r_id
+        reports_list.append(r)
+
+    # Statistik global untuk dashboard admin
+    stats = {
+        'total': db.reports.count_documents({}),
+        'pending': db.reports.count_documents({'status': 'pending'}),
+        'under_review': db.reports.count_documents({'status': 'under_review'}),
+        'resolved': db.reports.count_documents({'status': 'resolved'}),
+        'rejected': db.reports.count_documents({'status': 'rejected'}),
+    }
+
+    return jsonify({
+        'result': 'success',
+        'reports': reports_list,
+        'stats': stats,
+        'metrics': stats,
+        'total': total_count,
+        'page': page,
+        'limit': limit
+    }), 200
+
+
+@app.route('/api/admin/reports/<report_id>/status', methods=['POST'])
+def update_report_status(report_id):
+    """
+    Mengubah status laporan (pending, under_review, resolved, rejected)
+    serta menambahkan catatan moderasi secara aman.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    if not is_admin_user(current_username):
+        return jsonify({'result': 'fail', 'msg': 'Administrator privileges required'}), 403
+
+    if not report_id or not ObjectId.is_valid(report_id):
+        return jsonify({'result': 'fail', 'msg': 'Invalid report ID format'}), 400
+
+    report = db.reports.find_one({'_id': ObjectId(report_id)})
+    if not report:
+        return jsonify({'result': 'fail', 'msg': 'Report not found'}), 404
+
+    data = request.get_json(silent=True) or request.form or {}
+    new_status = (data.get('status') or '').strip().lower()
+    notes = (data.get('notes') or '').strip()
+
+    if new_status not in ('pending', 'under_review', 'resolved', 'rejected'):
+        return jsonify({'result': 'fail', 'msg': 'Invalid status. Must be pending, under_review, resolved, or rejected'}), 400
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    update_doc = {
+        'status': new_status,
+        'updated_at': now_iso
+    }
+    if new_status in ('resolved', 'rejected'):
+        update_doc['resolved_by'] = current_username
+        update_doc['resolved_at'] = now_iso
+
+    note_entry = None
+    if notes:
+        note_entry = {
+            'admin': current_username,
+            'note': notes,
+            'timestamp': now_iso,
+            'status_at_note': new_status
+        }
+        db.reports.update_one(
+            {'_id': ObjectId(report_id)},
+            {
+                '$set': update_doc,
+                '$push': {'moderation_notes': note_entry}
+            }
+        )
+    else:
+        db.reports.update_one({'_id': ObjectId(report_id)}, {'$set': update_doc})
+
+    # Simpan jejak audit log
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr or '')
+    db.moderation_logs.insert_one({
+        'admin_id': current_username,
+        'report_id': report_id,
+        'target_type': report.get('target_type'),
+        'target_id': report.get('target_id'),
+        'action': f'change_status_to_{new_status}',
+        'reason': notes or f'Status updated to {new_status}',
+        'timestamp': now_iso,
+        'ip_address': client_ip
+    })
+
+    return jsonify({
+        'result': 'success',
+        'msg': f'Report status updated to {new_status}',
+        'report_id': report_id,
+        'status': new_status
+    }), 200
+
+
+@app.route('/api/admin/reports/<report_id>/action', methods=['POST'])
+def take_moderation_action(report_id):
+    """
+    Eksekusi tindakan moderasi langsung oleh Administrator:
+    - dismiss: tolak laporan (rejected)
+    - resolve: selesaikan laporan (resolved)
+    - remove_post: hapus postingan target dengan cascading cleanup menyeluruh
+    - remove_comment: soft-delete komentar/reply target
+    - suspend_user: tangguhkan akun pengguna yang dilaporkan
+    - unsuspend_user: pulihkan akun yang ditangguhkan
+    Mencatat jejak audit log lengkap untuk setiap aksi.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    if not is_admin_user(current_username):
+        return jsonify({'result': 'fail', 'msg': 'Administrator privileges required'}), 403
+
+    if not report_id or not ObjectId.is_valid(report_id):
+        return jsonify({'result': 'fail', 'msg': 'Invalid report ID format'}), 400
+
+    report = db.reports.find_one({'_id': ObjectId(report_id)})
+    if not report:
+        return jsonify({'result': 'fail', 'msg': 'Report not found'}), 404
+
+    data = request.get_json(silent=True) or request.form or {}
+    action = (data.get('action') or '').strip().lower()
+    if action == 'dismiss_report':
+        action = 'dismiss'
+    reason = (data.get('reason') or data.get('notes') or '').strip()
+
+    if not action or action not in ('dismiss', 'resolve', 'remove_post', 'remove_comment', 'suspend_user', 'unsuspend_user'):
+        return jsonify({
+            'result': 'fail',
+            'msg': 'Invalid action. Must be dismiss, resolve, remove_post, remove_comment, suspend_user, or unsuspend_user'
+        }), 400
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr or '')
+    target_type = report.get('target_type')
+    target_id = report.get('target_id')
+
+    # 1. Action: dismiss (Tolak laporan)
+    if action == 'dismiss':
+        db.reports.update_one(
+            {'_id': ObjectId(report_id)},
+            {
+                '$set': {
+                    'status': 'rejected',
+                    'updated_at': now_iso,
+                    'resolved_by': current_username,
+                    'resolved_at': now_iso
+                },
+                '$push': {
+                    'moderation_notes': {
+                        'admin': current_username,
+                        'note': reason or 'Report dismissed by administrator',
+                        'timestamp': now_iso,
+                        'action': 'dismiss'
+                    }
+                }
+            }
+        )
+
+    # 2. Action: resolve (Selesaikan laporan tanpa menghapus)
+    elif action == 'resolve':
+        db.reports.update_one(
+            {'_id': ObjectId(report_id)},
+            {
+                '$set': {
+                    'status': 'resolved',
+                    'updated_at': now_iso,
+                    'resolved_by': current_username,
+                    'resolved_at': now_iso
+                },
+                '$push': {
+                    'moderation_notes': {
+                        'admin': current_username,
+                        'note': reason or 'Report resolved by administrator',
+                        'timestamp': now_iso,
+                        'action': 'resolve'
+                    }
+                }
+            }
+        )
+
+    # 3. Action: remove_post (Hapus postingan dengan cascading cleanup)
+    elif action == 'remove_post':
+        if target_type != 'post' or not ObjectId.is_valid(target_id):
+            return jsonify({'result': 'fail', 'msg': 'Target is not a valid post'}), 400
+
+        target_post = db.posts.find_one({'_id': ObjectId(target_id)})
+        if target_post:
+            # Hapus dokumen postingan
+            db.posts.delete_one({'_id': ObjectId(target_id)})
+            # Bersihkan referensi terkait (bookmarks, reactions, comments, reposts, notifications, images)
+            db.bookmarks.delete_many({'post_id': target_id})
+            db.likes.delete_many({'post_id': target_id})
+            db.stars.delete_many({'post_id': target_id})
+            db.thumbs.delete_many({'post_id': target_id})
+            db.comments.delete_many({'post_id': target_id})
+            db.posts.delete_many({'original_post_id': target_id, 'post_type': 'repost'})
+            cleanup_notifications_for_post(target_id)
+
+            if target_post.get('post_type') != 'repost':
+                for img in (target_post.get('images') or []):
+                    if isinstance(img, dict) and img.get('filename'):
+                        safe_delete_post_image(img['filename'], check_db_refs=True)
+
+        db.reports.update_one(
+            {'_id': ObjectId(report_id)},
+            {
+                '$set': {
+                    'status': 'resolved',
+                    'updated_at': now_iso,
+                    'resolved_by': current_username,
+                    'resolved_at': now_iso
+                },
+                '$push': {
+                    'moderation_notes': {
+                        'admin': current_username,
+                        'note': reason or 'Target post was removed by administrator',
+                        'timestamp': now_iso,
+                        'action': 'remove_post'
+                    }
+                }
+            }
+        )
+
+    # 4. Action: remove_comment (Soft-delete komentar/reply)
+    elif action == 'remove_comment':
+        if target_type not in ('comment', 'reply') or not ObjectId.is_valid(target_id):
+            return jsonify({'result': 'fail', 'msg': 'Target is not a valid comment'}), 400
+
+        db.comments.update_one(
+            {'_id': ObjectId(target_id)},
+            {
+                '$set': {
+                    'is_deleted': True,
+                    'content': '[Komentar ini telah dihapus oleh tim moderasi]',
+                    'updated_at': now_iso
+                }
+            }
+        )
+
+        db.reports.update_one(
+            {'_id': ObjectId(report_id)},
+            {
+                '$set': {
+                    'status': 'resolved',
+                    'updated_at': now_iso,
+                    'resolved_by': current_username,
+                    'resolved_at': now_iso
+                },
+                '$push': {
+                    'moderation_notes': {
+                        'admin': current_username,
+                        'note': reason or 'Target comment was removed by administrator',
+                        'timestamp': now_iso,
+                        'action': 'remove_comment'
+                    }
+                }
+            }
+        )
+
+    # 5. Action: suspend_user (Tangguhkan akun pengguna)
+    elif action == 'suspend_user':
+        target_uname = report.get('target_author') or (target_id if target_type == 'user' else None)
+        if not target_uname:
+            return jsonify({'result': 'fail', 'msg': 'Cannot identify target user to suspend'}), 400
+
+        db.users.update_one(
+            {'username': target_uname},
+            {
+                '$set': {
+                    'is_suspended': True,
+                    'suspended_at': now_iso,
+                    'suspended_by': current_username,
+                    'suspension_reason': reason or 'Suspended due to community violation'
+                }
+            }
+        )
+
+        db.reports.update_one(
+            {'_id': ObjectId(report_id)},
+            {
+                '$set': {
+                    'status': 'resolved',
+                    'updated_at': now_iso,
+                    'resolved_by': current_username,
+                    'resolved_at': now_iso
+                },
+                '$push': {
+                    'moderation_notes': {
+                        'admin': current_username,
+                        'note': reason or f'User @{target_uname} was suspended by administrator',
+                        'timestamp': now_iso,
+                        'action': 'suspend_user'
+                    }
+                }
+            }
+        )
+
+    # 6. Action: unsuspend_user (Pulihkan penangguhan akun)
+    elif action == 'unsuspend_user':
+        target_uname = report.get('target_author') or (target_id if target_type == 'user' else None)
+        if not target_uname:
+            return jsonify({'result': 'fail', 'msg': 'Cannot identify target user to unsuspend'}), 400
+
+        db.users.update_one(
+            {'username': target_uname},
+            {
+                '$set': {
+                    'is_suspended': False,
+                    'unsuspended_at': now_iso,
+                    'unsuspended_by': current_username
+                }
+            }
+        )
+
+        db.reports.update_one(
+            {'_id': ObjectId(report_id)},
+            {
+                '$set': {
+                    'updated_at': now_iso
+                },
+                '$push': {
+                    'moderation_notes': {
+                        'admin': current_username,
+                        'note': reason or f'User @{target_uname} suspension was lifted by administrator',
+                        'timestamp': now_iso,
+                        'action': 'unsuspend_user'
+                    }
+                }
+            }
+        )
+
+    # Catat audit log untuk setiap tindakan
+    db.moderation_logs.insert_one({
+        'admin': current_username,
+        'admin_id': current_username,
+        'report_id': report_id,
+        'target_type': target_type,
+        'target_id': target_id,
+        'action': action,
+        'reason': reason or f'Executed moderation action: {action}',
+        'timestamp': now_iso,
+        'ip_address': client_ip
+    })
+
+    return jsonify({
+        'result': 'success',
+        'msg': f'Action {action} executed successfully',
+        'report_id': report_id,
+        'action': action
+    }), 200
+
+
+@app.route('/api/admin/audit_logs', methods=['GET'])
+def get_admin_audit_logs():
+    """Mengambil riwayat audit log tindakan moderasi admin."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    if not is_admin_user(current_username):
+        return jsonify({'result': 'fail', 'msg': 'Administrator privileges required'}), 403
+
+    limit_raw = request.args.get('limit', '50').strip()
+    try:
+        limit = max(1, min(int(limit_raw), 100))
+    except ValueError:
+        limit = 50
+
+    logs_cursor = db.moderation_logs.find().sort('timestamp', -1).limit(limit)
+    logs_list = []
+    for l in logs_cursor:
+        l['_id'] = str(l['_id'])
+        logs_list.append(l)
+
+    return jsonify({
+        'result': 'success',
+        'logs': logs_list,
+        'audit_logs': logs_list,
+        'total': len(logs_list)
+    }), 200
 
 
 # ==========================================
@@ -2732,6 +3802,10 @@ def get_trending_posts():
 
     now = datetime.now(timezone.utc)
     match_query = {'post_type': {'$ne': 'repost'}, 'community_visibility': {'$ne': 'private'}}
+    if current_username:
+        blocked_or_muted = get_all_blocked_relation_usernames(current_username) | set(get_muted_usernames(current_username))
+        if blocked_or_muted:
+            match_query['username'] = {'$nin': list(blocked_or_muted)}
 
     if period == 'today':
         cutoff = (now - timedelta(days=1)).isoformat()
@@ -2843,7 +3917,11 @@ def get_tag_posts_api(tag):
         limit = 20
 
     query = {'hashtags': clean_tag, 'post_type': {'$ne': 'repost'}, 'community_visibility': {'$ne': 'private'}}
-    total_count = db.posts.count_documents({'hashtags': clean_tag, 'post_type': {'$ne': 'repost'}, 'community_visibility': {'$ne': 'private'}})
+    if current_username:
+        blocked_or_muted = get_all_blocked_relation_usernames(current_username) | set(get_muted_usernames(current_username))
+        if blocked_or_muted:
+            query['username'] = {'$nin': list(blocked_or_muted)}
+    total_count = db.posts.count_documents(query)
 
     if sort_mode == 'latest':
         if cursor and ObjectId.is_valid(cursor):
@@ -2925,6 +4003,7 @@ def search_api():
 
     safe_q = re.escape(q)
     results = {'result': 'success', 'query': q, 'type': search_type, 'users': [], 'posts': [], 'hashtags': []}
+    blocked_or_muted = get_all_blocked_relation_usernames(current_username) | set(get_muted_usernames(current_username)) if current_username else set()
 
     # 1. Search Users
     if search_type in ['all', 'users']:
@@ -2934,10 +4013,12 @@ def search_api():
                 {'username': {'$regex': clean_user_q, '$options': 'i'}},
                 {'profile_name': {'$regex': clean_user_q, '$options': 'i'}}
             ]
-        }, {'password': 0}).limit(limit))
+        }, {'password': 0}).limit(limit * 2))
 
         for u in user_matches:
             uname = u['username']
+            if uname in blocked_or_muted:
+                continue
             results['users'].append({
                 'username': uname,
                 'profile_name': u.get('profile_name', uname),
@@ -2947,6 +4028,8 @@ def search_api():
                 'is_following': is_following(current_username, uname) if current_username else False,
                 'is_mine': (uname == current_username)
             })
+            if len(results['users']) >= limit:
+                break
 
     # 2. Search Hashtags (tanpa membocorkan postingan komunitas private)
     if search_type in ['all', 'tags'] or q.startswith('#'):
@@ -2974,6 +4057,8 @@ def search_api():
     # 3. Search Posts
     if search_type in ['all', 'posts']:
         post_query = {'comment': {'$regex': safe_q, '$options': 'i'}, 'post_type': {'$ne': 'repost'}, 'community_visibility': {'$ne': 'private'}}
+        if blocked_or_muted:
+            post_query['username'] = {'$nin': list(blocked_or_muted)}
         post_matches = list(db.posts.find(post_query).sort([('date', -1)]).limit(limit))
         results['posts'] = enrich_posts_metadata(post_matches, current_username)
 

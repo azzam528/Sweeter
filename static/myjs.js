@@ -407,6 +407,13 @@ function render_post_card(post, isStitch) {
             <span class="material-symbols-outlined text-[18px]">delete</span>
           </button>
         </div>`;
+      } else {
+        owner_actions = `
+        <div class="flex items-center gap-space-xs text-on-surface-variant">
+          <button type="button" onclick="open_report_modal('post', '${target_post_id}', '${username_escaped}')" class="p-1 rounded-full hover:bg-surface-container-high transition-colors text-on-surface-variant hover:text-primary border-0 bg-transparent cursor-pointer" title="Laporkan Postingan">
+            <span class="material-symbols-outlined text-[18px]">flag</span>
+          </button>
+        </div>`;
       }
     }
 
@@ -555,6 +562,11 @@ function render_post_card(post, isStitch) {
         <div class="media-right">
           <button type="button" class="button is-small is-white" onclick="open_edit_post('${post['_id']}')" title="Edit"><i class="fa fa-pencil"></i></button>
           <button type="button" class="button is-small is-white has-text-danger" onclick="delete_post('${post['_id']}')" title="Hapus"><i class="fa fa-trash"></i></button>
+        </div>`;
+      } else {
+        owner_actions_bulma = `
+        <div class="media-right">
+          <button type="button" class="button is-small is-white has-text-grey" onclick="open_report_modal('post', '${target_post_id}', '${username_escaped}')" title="Laporkan Postingan"><i class="fa fa-flag"></i></button>
         </div>`;
       }
     }
@@ -1062,6 +1074,12 @@ function render_comment_nodes(nodes, post_id, depth) {
             <span class="icon is-small"><i class="fa fa-trash"></i></span>&nbsp;<span>Delete</span>
           </a>
         `;
+      } else {
+        actions_html += `
+          <a class="level-item has-text-grey btn-action-report is-size-7" onclick="open_report_modal('comment', '${node._id}', '${escapeHtml(node.username)}')">
+            <span class="icon is-small"><i class="fa fa-flag"></i></span>&nbsp;<span>Report</span>
+          </a>
+        `;
       }
     }
 
@@ -1084,6 +1102,12 @@ function render_comment_nodes(nodes, post_id, depth) {
           stitch_actions += `
             <button class="text-error hover:underline transition-colors font-medium cursor-pointer border-0 bg-transparent p-0 flex items-center gap-1 btn-action-delete text-[12px] ml-3" onclick="delete_comment('${post_id}', '${node._id}')">
               <i class="fa fa-trash text-[10px]"></i><span>Delete</span>
+            </button>
+          `;
+        } else {
+          stitch_actions += `
+            <button class="hover:text-primary transition-colors font-medium cursor-pointer border-0 bg-transparent p-0 text-on-surface-variant flex items-center gap-1 btn-action-report text-[12px] ml-3" onclick="open_report_modal('comment', '${node._id}', '${escapeHtml(node.username)}')">
+              <i class="fa fa-flag text-[10px]"></i><span>Report</span>
             </button>
           `;
         }
@@ -4519,3 +4543,207 @@ function submit_community_post() {
     }
   });
 }
+
+// ==========================================
+// BLOCK, MUTE & REPORT SYSTEM MODALS & CLIENT ACTIONS
+// ==========================================
+
+window._pendingBlockUser = null;
+window._pendingUnblockUser = null;
+window._pendingMuteUser = null;
+window._pendingUnmuteUser = null;
+
+function open_block_modal(username) {
+  window._pendingBlockUser = username;
+  $('#block-modal-title').text(`Blokir @${username}?`);
+  $('#block-modal-desc').text(`@${username} tidak akan dapat mengikuti Anda atau melihat postingan Anda. Relasi follow yang ada akan terhapus otomatis.`);
+  $('#block-modal').removeClass('hidden is-hidden');
+}
+
+function close_block_modal() {
+  window._pendingBlockUser = null;
+  $('#block-modal').addClass('hidden is-hidden');
+}
+
+$(document).on('click', '#confirm-block-btn', function () {
+  if (!window._pendingBlockUser) return;
+  const username = window._pendingBlockUser;
+  const $btn = $(this);
+  $btn.prop('disabled', true).text('Memproses...');
+
+  $.ajax({
+    type: 'POST',
+    url: `/api/users/${encodeURIComponent(username)}/block`,
+    success: function (res) {
+      $btn.prop('disabled', false).text('Blokir');
+      close_block_modal();
+      window.location.reload();
+    },
+    error: function (xhr) {
+      $btn.prop('disabled', false).text('Blokir');
+      const msg = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : 'Gagal memblokir pengguna';
+      alert(msg);
+    }
+  });
+});
+
+function open_unblock_modal(username) {
+  window._pendingUnblockUser = username;
+  $('#unblock-modal-title').text(`Buka Blokir @${username}?`);
+  $('#unblock-modal-desc').text(`@${username} akan dapat melihat profil dan postingan Anda kembali. Membuka blokir tidak otomatis mengembalikan relasi follow sebelumnya.`);
+  $('#unblock-modal').removeClass('hidden is-hidden');
+}
+
+function close_unblock_modal() {
+  window._pendingUnblockUser = null;
+  $('#unblock-modal').addClass('hidden is-hidden');
+}
+
+$(document).on('click', '#confirm-unblock-btn', function () {
+  if (!window._pendingUnblockUser) return;
+  const username = window._pendingUnblockUser;
+  const $btn = $(this);
+  $btn.prop('disabled', true).text('Memproses...');
+
+  $.ajax({
+    type: 'POST',
+    url: `/api/users/${encodeURIComponent(username)}/unblock`,
+    success: function (res) {
+      $btn.prop('disabled', false).text('Buka Blokir');
+      close_unblock_modal();
+      window.location.reload();
+    },
+    error: function (xhr) {
+      $btn.prop('disabled', false).text('Buka Blokir');
+      const msg = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : 'Gagal membuka blokir';
+      alert(msg);
+    }
+  });
+});
+
+function open_mute_modal(username) {
+  window._pendingMuteUser = username;
+  $('#mute-modal-title').text(`Mute @${username}?`);
+  $('#mute-modal-desc').text(`Postingan dan repost dari @${username} tidak akan muncul di timeline Anda. Pengguna tidak akan tahu bahwa mereka di-mute.`);
+  $('#mute-modal').removeClass('hidden is-hidden');
+}
+
+function close_mute_modal() {
+  window._pendingMuteUser = null;
+  $('#mute-modal').addClass('hidden is-hidden');
+}
+
+$(document).on('click', '#confirm-mute-btn', function () {
+  if (!window._pendingMuteUser) return;
+  const username = window._pendingMuteUser;
+  const $btn = $(this);
+  $btn.prop('disabled', true).text('Memproses...');
+
+  $.ajax({
+    type: 'POST',
+    url: `/api/users/${encodeURIComponent(username)}/mute`,
+    success: function (res) {
+      $btn.prop('disabled', false).text('Mute');
+      close_mute_modal();
+      window.location.reload();
+    },
+    error: function (xhr) {
+      $btn.prop('disabled', false).text('Mute');
+      const msg = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : 'Gagal me-mute pengguna';
+      alert(msg);
+    }
+  });
+});
+
+function open_unmute_modal(username) {
+  window._pendingUnmuteUser = username;
+  $('#unmute-modal-title').text(`Buka Mute @${username}?`);
+  $('#unmute-modal-desc').text(`Postingan dari @${username} akan kembali muncul di timeline Anda.`);
+  $('#unmute-modal').removeClass('hidden is-hidden');
+}
+
+function close_unmute_modal() {
+  window._pendingUnmuteUser = null;
+  $('#unmute-modal').addClass('hidden is-hidden');
+}
+
+$(document).on('click', '#confirm-unmute-btn', function () {
+  if (!window._pendingUnmuteUser) return;
+  const username = window._pendingUnmuteUser;
+  const $btn = $(this);
+  $btn.prop('disabled', true).text('Memproses...');
+
+  $.ajax({
+    type: 'POST',
+    url: `/api/users/${encodeURIComponent(username)}/unmute`,
+    success: function (res) {
+      $btn.prop('disabled', false).text('Buka Mute');
+      close_unmute_modal();
+      window.location.reload();
+    },
+    error: function (xhr) {
+      $btn.prop('disabled', false).text('Buka Mute');
+      const msg = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : 'Gagal membuka mute';
+      alert(msg);
+    }
+  });
+});
+
+// Report Modal Handling
+function open_report_modal(targetType, targetId, authorName) {
+  $('#report-target-type').val(targetType);
+  $('#report-target-id').val(targetId);
+  $('#report-reason-select').val('spam');
+  $('#report-description').val('');
+
+  let targetLabel = 'Konten';
+  if (targetType === 'user') targetLabel = `Pengguna @${authorName || targetId}`;
+  else if (targetType === 'post') targetLabel = `Postingan oleh @${authorName || ''}`;
+  else if (targetType === 'comment' || targetType === 'reply') targetLabel = `Komentar oleh @${authorName || ''}`;
+
+  $('#report-modal-title').text(`Laporkan ${targetLabel}`);
+  $('#report-modal-target-desc').text(`Laporan Anda bersifat rahasia dan akan ditinjau oleh tim moderasi.`);
+  $('#report-modal').removeClass('hidden is-hidden');
+}
+
+function close_report_modal() {
+  $('#report-modal').addClass('hidden is-hidden');
+}
+
+function submit_report_form() {
+  const targetType = $('#report-target-type').val();
+  const targetId = $('#report-target-id').val();
+  const reason = $('#report-reason-select').val();
+  const description = $('#report-description').val().trim();
+
+  if (!targetType || !targetId || !reason) {
+    alert('Mohon pilih alasan pelaporan.');
+    return;
+  }
+
+  const $btn = $('#confirm-submit-report-btn');
+  $btn.prop('disabled', true).text('Mengirim...');
+
+  $.ajax({
+    type: 'POST',
+    url: '/api/reports',
+    contentType: 'application/json',
+    data: JSON.stringify({
+      target_type: targetType,
+      target_id: targetId,
+      reason: reason,
+      description: description
+    }),
+    success: function (res) {
+      $btn.prop('disabled', false).text('Kirim Laporan');
+      close_report_modal();
+      alert(res.msg || 'Laporan berhasil dikirim. Terima kasih.');
+    },
+    error: function (xhr) {
+      $btn.prop('disabled', false).text('Kirim Laporan');
+      const msg = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : 'Gagal mengirim laporan';
+      alert(msg);
+    }
+  });
+}
+

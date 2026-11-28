@@ -1,35 +1,58 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="utf-8"/>
-  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <meta charset="utf-8" />
+  <meta content="width=device-width, initial-scale=1.0" name="viewport" />
   <title>{{ user_info.profile_name | e }} (@{{ user_info.username | e }}) — Sweeter</title>
 
   <!-- Google Fonts: Manrope + Material Symbols -->
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
-  <link href="https://fonts.googleapis.com" rel="preconnect"/>
-  <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
+    rel="stylesheet" />
+  <link href="https://fonts.googleapis.com" rel="preconnect" />
+  <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&amp;display=swap"
+    rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+    rel="stylesheet" />
 
   <!-- jQuery 3.4.1 + js-cookie -->
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/js-cookie@2.2.1/src/js.cookie.min.js"></script>
 
   <!-- Sweeter custom CSS -->
-  <link rel="stylesheet" href="{{ url_for('static', filename='mystyle.css') }}"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='mystyle.css') }}" />
   <!-- Font Awesome 4.7 -->
-  <link href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet"/>
+  <link href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet" />
 
   <!-- Tailwind CSS -->
   <style>
     @layer base {
-      html, body { margin: 0; padding: 0; }
-      body { overscroll-behavior: none; }
-      main > :first-child { margin-top: 0 !important; }
-      main > :last-child { margin-bottom: 0 !important; }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        overscroll-behavior: none;
+      }
+
+      main> :first-child {
+        margin-top: 0 !important;
+      }
+
+      main> :last-child {
+        margin-bottom: 0 !important;
+      }
     }
-    ::-webkit-scrollbar { display: none; }
+
+    ::-webkit-scrollbar {
+      display: none;
+    }
   </style>
   <script src="https://cdn.tailwindcss.com"></script>
   <script id="tailwind-config">
@@ -97,457 +120,783 @@
 
 <body class="bg-background font-body-md text-body-md text-on-surface antialiased">
 
-<!-- ===== HEADER / TOP NAVBAR ===== -->
-<header class="fixed top-0 left-0 right-0 z-40 bg-surface/80 backdrop-blur-xl shadow-[0_1px_8px_rgba(88,48,48,0.04)]">
-  <div class="h-16 max-w-7xl mx-auto px-4 md:px-margin-desktop flex items-center justify-between">
-    <!-- Brand -->
-    <div class="flex items-center gap-space-sm">
-      <a href="/" class="font-headline-sm text-headline-sm text-primary font-bold tracking-tight no-underline">Sweeter</a>
-    </div>
-    <!-- Center nav -->
-    <nav class="hidden lg:flex items-center gap-space-md">
-      <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md no-underline" href="/">Timeline</a>
-      <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md no-underline" href="/bookmarks">Bookmarks</a>
-      <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md no-underline flex items-center gap-1.5" href="/notifications">
-        <span>Notifications</span>
-        <span id="header-unread-badge" class="hidden bg-primary-container text-on-primary text-[10px] font-bold px-1.5 py-0.2 rounded-full"></span>
-      </a>
-    </nav>
-    <!-- Right: User info + Sign Out -->
-    <div class="flex items-center gap-space-md">
+  <!-- ===== HEADER / TOP NAVBAR ===== -->
+  <header class="fixed top-0 left-0 right-0 z-40 bg-surface/80 backdrop-blur-xl shadow-[0_1px_8px_rgba(88,48,48,0.04)]">
+    <div class="h-16 max-w-7xl mx-auto px-4 md:px-margin-desktop flex items-center justify-between">
+      <!-- Brand -->
       <div class="flex items-center gap-space-sm">
-        <span class="font-label-md text-label-md text-on-surface hidden sm:inline-block">{{ (current_user.profile_name if current_user else user_info.profile_name) | e }}</span>
-        <a href="/user/{{ (current_user.username if current_user else user_info.username) | e }}">
-          <img alt="Profile"
-               class="w-8 h-8 rounded-full object-cover cursor-pointer"
-               src="/static/{{ (current_user.profile_pic_real if current_user else user_info.profile_pic_real) | e }}"
-               onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
-        </a>
+        <a href="/"
+          class="font-headline-sm text-headline-sm text-primary font-bold tracking-tight no-underline">Sweeter</a>
       </div>
-      <form action="/sign_out" method="post" class="inline m-0">
-        <button type="submit"
-                class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full hover:bg-surface-container border-0 bg-transparent cursor-pointer">
-          Sign Out
-        </button>
-      </form>
-    </div>
-  </div>
-</header>
-
-<div class="max-w-7xl mx-auto px-4 md:px-margin-desktop">
-
-  <!-- ===== LEFT SIDEBAR (hidden on mobile, visible on tablet/desktop) ===== -->
-  <aside class="hidden md:flex fixed top-16 left-[max(1rem,calc((100vw-80rem)/2+2.5rem))] h-[calc(100vh-4rem)] w-[240px] z-30 flex-col justify-between py-space-lg pr-space-md bg-transparent">
-    <div class="flex flex-col gap-space-lg">
-      <nav class="flex flex-col gap-space-xs">
-        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/">
-          <span class="material-symbols-outlined text-[22px]">home</span>
-          <span class="font-label-md text-label-md">Home</span>
-        </a>
-        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/explore">
-          <span class="material-symbols-outlined text-[22px]">explore</span>
-          <span class="font-label-md text-label-md">Explore</span>
-        </a>
-        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/communities">
-          <span class="material-symbols-outlined text-[22px]">groups</span>
-          <span class="font-label-md text-label-md">Communities</span>
-        </a>
-        <a aria-current="page" class="flex items-center gap-space-md px-space-md py-space-sm rounded-full transition-all {% if status %}bg-secondary-container text-on-secondary-container font-semibold{% else %}text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface{% endif %} no-underline" href="/user/{{ (current_user.username if current_user else user_info.username) | e }}">
-          <span class="material-symbols-outlined text-[22px]">person</span>
-          <span class="font-label-md text-label-md">Profile</span>
-        </a>
-        <a class="flex items-center justify-between px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/drafts">
-          <div class="flex items-center gap-space-md">
-            <span class="material-symbols-outlined text-[22px]">drafts</span>
-            <span class="font-label-md text-label-md">Drafts</span>
-          </div>
-          <span id="nav-drafts-badge" class="hidden bg-secondary-container text-on-secondary-container text-caption font-bold px-2 py-0.5 rounded-full text-[11px] leading-tight"></span>
-        </a>
-        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/bookmarks">
-          <span class="material-symbols-outlined text-[22px]">bookmark</span>
-          <span class="font-label-md text-label-md">Bookmarks</span>
-        </a>
-        <a class="flex items-center justify-between px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/notifications" id="sidebar-notifications-link">
-          <div class="flex items-center gap-space-md">
-            <span class="material-symbols-outlined text-[22px]">notifications</span>
-            <span class="font-label-md text-label-md">Notifications</span>
-          </div>
-          <span id="nav-unread-badge" class="hidden bg-primary-container text-on-primary text-caption font-bold px-2 py-0.5 rounded-full text-[11px] leading-tight"></span>
+      <!-- Center nav -->
+      <nav class="hidden lg:flex items-center gap-space-md">
+        <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md no-underline"
+          href="/">Timeline</a>
+        <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md no-underline"
+          href="/bookmarks">Bookmarks</a>
+        <a class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md no-underline flex items-center gap-1.5"
+          href="/notifications">
+          <span>Notifications</span>
+          <span id="header-unread-badge"
+            class="hidden bg-primary-container text-on-primary text-[10px] font-bold px-1.5 py-0.2 rounded-full"></span>
         </a>
       </nav>
-      <a href="/" class="w-full flex items-center justify-center gap-space-xs py-space-sm px-space-lg bg-primary-container text-on-primary rounded-full font-label-md text-label-md hover:bg-primary transition-all shadow-[0_4px_16px_-2px_rgba(88,48,48,0.2)] no-underline">
-        <span class="material-symbols-outlined text-[20px]">edit_note</span>
-        <span>Create Post</span>
-      </a>
-    </div>
-    <!-- Bottom user identity card -->
-    <a href="/user/{{ (current_user.username if current_user else user_info.username) | e }}"
-       class="flex items-center justify-between p-space-sm rounded-xl bg-surface-container-low hover:bg-surface-container transition-colors cursor-pointer no-underline">
-      <div class="flex items-center gap-space-sm min-w-0">
-        <img alt="Profile"
-             class="w-10 h-10 rounded-full object-cover flex-shrink-0"
-             src="/static/{{ (current_user.profile_pic_real if current_user else user_info.profile_pic_real) | e }}"
-             onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
-        <div class="flex flex-col min-w-0">
-          <span class="font-label-md text-label-md text-on-surface truncate">{{ (current_user.profile_name if current_user else user_info.profile_name) | e }}</span>
-          <span class="font-caption text-caption text-on-surface-variant truncate">@{{ (current_user.username if current_user else user_info.username) | e }}</span>
+      <!-- Right: User info + Sign Out -->
+      <div class="flex items-center gap-space-md">
+        <div class="flex items-center gap-space-sm">
+          <span class="font-label-md text-label-md text-on-surface hidden sm:inline-block">{{ (current_user.profile_name
+            if current_user else user_info.profile_name) | e }}</span>
+          <a href="/user/{{ (current_user.username if current_user else user_info.username) | e }}">
+            <img alt="Profile" class="w-8 h-8 rounded-full object-cover cursor-pointer"
+              src="/static/{{ (current_user.profile_pic_real if current_user else user_info.profile_pic_real) | e }}"
+              onerror="this.src='/static/profile_pics/profile_placeholder.png'" />
+          </a>
         </div>
+        <form action="/sign_out" method="post" class="inline m-0">
+          <button type="submit"
+            class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full hover:bg-surface-container border-0 bg-transparent cursor-pointer">
+            Sign Out
+          </button>
+        </form>
       </div>
-      <span class="material-symbols-outlined text-on-surface-variant text-[20px]">more_horiz</span>
-    </a>
-  </aside>
+    </div>
+  </header>
 
-  <!-- ===== MAIN CONTENT COLUMN ===== -->
-  <div class="pl-0 md:pl-[264px] pr-0 xl:pr-[344px] min-h-screen">
-    <main class="relative pt-16 bg-transparent max-w-[620px] mx-auto min-h-screen py-space-lg">
-      <div class="flex flex-col w-full">
+  <div class="max-w-7xl mx-auto px-4 md:px-margin-desktop">
 
-        <!-- ===== PROFILE HEADER ===== -->
-        <div class="relative w-full rounded-2xl overflow-hidden bg-surface-container-high shadow-sm">
-          <!-- Cover banner — warm terracotta gradient background; TODO: custom user cover image -->
-          <div class="w-full h-44 sm:h-52 bg-cover bg-center relative"
-               style="background-color: #583030;">
-            <div class="absolute inset-0 bg-gradient-to-t from-primary/60 via-transparent to-transparent"></div>
+    <!-- ===== LEFT SIDEBAR (hidden on mobile, visible on tablet/desktop) ===== -->
+    <aside
+      class="hidden md:flex fixed top-16 left-[max(1rem,calc((100vw-80rem)/2+2.5rem))] h-[calc(100vh-4rem)] w-[240px] z-30 flex-col justify-between py-space-lg pr-space-md bg-transparent">
+      <div class="flex flex-col gap-space-lg">
+        <nav class="flex flex-col gap-space-xs">
+          <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline"
+            href="/">
+            <span class="material-symbols-outlined text-[22px]">home</span>
+            <span class="font-label-md text-label-md">Home</span>
+          </a>
+          <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline"
+            href="/explore">
+            <span class="material-symbols-outlined text-[22px]">explore</span>
+            <span class="font-label-md text-label-md">Explore</span>
+          </a>
+          <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline"
+            href="/communities">
+            <span class="material-symbols-outlined text-[22px]">groups</span>
+            <span class="font-label-md text-label-md">Communities</span>
+          </a>
+          <a aria-current="page"
+            class="flex items-center gap-space-md px-space-md py-space-sm rounded-full transition-all {% if status %}bg-secondary-container text-on-secondary-container font-semibold{% else %}text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface{% endif %} no-underline"
+            href="/user/{{ (current_user.username if current_user else user_info.username) | e }}">
+            <span class="material-symbols-outlined text-[22px]">person</span>
+            <span class="font-label-md text-label-md">Profile</span>
+          </a>
+          <a class="flex items-center justify-between px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline"
+            href="/drafts">
+            <div class="flex items-center gap-space-md">
+              <span class="material-symbols-outlined text-[22px]">drafts</span>
+              <span class="font-label-md text-label-md">Drafts</span>
+            </div>
+            <span id="nav-drafts-badge"
+              class="hidden bg-secondary-container text-on-secondary-container text-caption font-bold px-2 py-0.5 rounded-full text-[11px] leading-tight"></span>
+          </a>
+          <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline"
+            href="/bookmarks">
+            <span class="material-symbols-outlined text-[22px]">bookmark</span>
+            <span class="font-label-md text-label-md">Bookmarks</span>
+          </a>
+          <a class="flex items-center justify-between px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline"
+            href="/notifications" id="sidebar-notifications-link">
+            <div class="flex items-center gap-space-md">
+              <span class="material-symbols-outlined text-[22px]">notifications</span>
+              <span class="font-label-md text-label-md">Notifications</span>
+            </div>
+            <span id="nav-unread-badge"
+              class="hidden bg-primary-container text-on-primary text-caption font-bold px-2 py-0.5 rounded-full text-[11px] leading-tight"></span>
+          </a>
+          <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline"
+            href="/blocked">
+            <span class="material-symbols-outlined text-[22px]">block</span>
+            <span class="font-label-md text-label-md">Blocked</span>
+          </a>
+          <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline"
+            href="/muted">
+            <span class="material-symbols-outlined text-[22px]">volume_off</span>
+            <span class="font-label-md text-label-md">Muted</span>
+          </a>
+          {% if is_admin %}
+          <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-error-container hover:text-error transition-all no-underline font-semibold"
+            href="/admin/reports">
+            <span class="material-symbols-outlined text-[22px]">admin_panel_settings</span>
+            <span class="font-label-md text-label-md">Moderation</span>
+          </a>
+          {% endif %}
+        </nav>
+        <a href="/"
+          class="w-full flex items-center justify-center gap-space-xs py-space-sm px-space-lg bg-primary-container text-on-primary rounded-full font-label-md text-label-md hover:bg-primary transition-all shadow-[0_4px_16px_-2px_rgba(88,48,48,0.2)] no-underline">
+          <span class="material-symbols-outlined text-[20px]">edit_note</span>
+          <span>Create Post</span>
+        </a>
+      </div>
+      <!-- Bottom user identity card -->
+      <a href="/user/{{ (current_user.username if current_user else user_info.username) | e }}"
+        class="flex items-center justify-between p-space-sm rounded-xl bg-surface-container-low hover:bg-surface-container transition-colors cursor-pointer no-underline">
+        <div class="flex items-center gap-space-sm min-w-0">
+          <img alt="Profile" class="w-10 h-10 rounded-full object-cover flex-shrink-0"
+            src="/static/{{ (current_user.profile_pic_real if current_user else user_info.profile_pic_real) | e }}"
+            onerror="this.src='/static/profile_pics/profile_placeholder.png'" />
+          <div class="flex flex-col min-w-0">
+            <span class="font-label-md text-label-md text-on-surface truncate">{{ (current_user.profile_name if
+              current_user else user_info.profile_name) | e }}</span>
+            <span class="font-caption text-caption text-on-surface-variant truncate">@{{ (current_user.username if
+              current_user else user_info.username) | e }}</span>
           </div>
+        </div>
+        <span class="material-symbols-outlined text-on-surface-variant text-[20px]">more_horiz</span>
+      </a>
+    </aside>
 
-          <!-- Profile Identity Bar -->
-          <div class="px-5 pb-5 pt-0 bg-surface-container-lowest relative">
-            <div class="flex items-end justify-between -mt-14 sm:-mt-16 mb-4">
-              <!-- Avatar -->
-              <div class="relative group">
-                <div class="w-24 h-24 sm:w-28 sm:h-28 rounded-full p-1 bg-surface-container-lowest shadow-md transition-transform duration-300 group-hover:scale-[1.02]">
-                  <img class="w-full h-full object-cover rounded-full"
-                       id="profile-avatar"
-                       alt="{{ user_info.profile_name | e }}"
-                       src="/static/{{ user_info.profile_pic_real | e }}"
-                       onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+    <!-- ===== MAIN CONTENT COLUMN ===== -->
+    <div class="pl-0 md:pl-[264px] pr-0 xl:pr-[344px] min-h-screen">
+      <main class="relative pt-16 bg-transparent max-w-[620px] mx-auto min-h-screen py-space-lg">
+        <div class="flex flex-col w-full">
+
+          <!-- ===== PROFILE HEADER ===== -->
+          <div class="relative w-full rounded-2xl overflow-hidden bg-surface-container-high shadow-sm">
+            <!-- Cover banner — warm terracotta gradient background; TODO: custom user cover image -->
+            <div class="w-full h-44 sm:h-52 bg-cover bg-center relative" style="background-color: #583030;">
+              <div class="absolute inset-0 bg-gradient-to-t from-primary/60 via-transparent to-transparent"></div>
+            </div>
+
+            <!-- Profile Identity Bar -->
+            <div class="px-5 pb-5 pt-0 bg-surface-container-lowest relative">
+              <div class="flex items-end justify-between -mt-14 sm:-mt-16 mb-4">
+                <!-- Avatar -->
+                <div class="relative group">
+                  <div
+                    class="w-24 h-24 sm:w-28 sm:h-28 rounded-full p-1 bg-surface-container-lowest shadow-md transition-transform duration-300 group-hover:scale-[1.02]">
+                    <img class="w-full h-full object-cover rounded-full" id="profile-avatar"
+                      alt="{{ user_info.profile_name | e }}" src="/static/{{ user_info.profile_pic_real | e }}"
+                      onerror="this.src='/static/profile_pics/profile_placeholder.png'" />
+                  </div>
+                </div>
+                <!-- Profile Actions -->
+                <div class="flex items-center gap-space-sm pt-2">
+                  <button
+                    class="p-2 sm:px-3 sm:py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface transition-all duration-150 flex items-center gap-1.5 font-label-sm text-label-sm border-0 cursor-pointer"
+                    id="share-profile-btn" title="Share Profile">
+                    <span class="material-symbols-outlined text-[18px]">ios_share</span>
+                    <span class="hidden sm:inline">Share</span>
+                  </button>
+                  {% if status %}
+                  <!-- Own profile: show Edit Profile button -->
+                  <button id="edit-profile-btn"
+                    class="px-4 py-1.5 rounded-full bg-surface-container-low hover:bg-surface-container-high text-on-surface font-label-md text-label-md transition-all duration-150 shadow-sm border-0 cursor-pointer">
+                    Edit Profile
+                  </button>
+                  {% else %}
+                  {% if is_blocked_by_me %}
+                  <button onclick="open_unblock_modal('{{ user_info.username | e }}')"
+                    class="px-5 py-1.5 rounded-full bg-surface-container-high hover:bg-surface-container text-on-surface font-label-md text-label-md transition-all duration-150 shadow-sm border border-outline-variant cursor-pointer">
+                    Unblock
+                  </button>
+                  {% elif is_blocking_me %}
+                  <!-- Blocked by other user: no interaction button -->
+                  {% else %}
+                  <!-- Other user's profile: Follow / Following button -->
+                  {% if is_following %}
+                  <button id="follow-btn" data-username="{{ user_info.username | e }}" data-following="true"
+                    class="px-5 py-1.5 rounded-full bg-surface-container-high hover:bg-error-container hover:text-on-error-container text-on-surface font-label-md text-label-md transition-all duration-150 shadow-sm border border-outline-variant cursor-pointer group">
+                    <span class="group-hover:hidden">Following</span>
+                    <span class="hidden group-hover:inline">Unfollow</span>
+                  </button>
+                  {% else %}
+                  <button id="follow-btn" data-username="{{ user_info.username | e }}" data-following="false"
+                    class="px-5 py-1.5 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-all duration-150 shadow-sm border-0 cursor-pointer">
+                    Follow
+                  </button>
+                  {% endif %}
+                  {% endif %}
+
+                  <!-- 3-Dots More Options Menu for Other Users -->
+                  <div class="relative inline-block text-left" id="profile-more-menu-container">
+                    <button type="button" onclick="toggle_profile_menu(event)" id="profile-more-btn"
+                      class="p-2 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface transition-colors border-0 cursor-pointer flex items-center justify-center"
+                      title="More Options">
+                      <span class="material-symbols-outlined text-[20px]">more_vert</span>
+                    </button>
+                    <div id="profile-more-dropdown"
+                      class="hidden absolute right-0 top-full mt-1.5 w-48 rounded-2xl bg-surface-container-lowest shadow-xl border border-outline-variant/30 py-1.5 z-50 font-label-md text-label-md">
+                      {% if is_blocked_by_me %}
+                      <button type="button"
+                        onclick="open_unblock_modal('{{ user_info.username | e }}'); close_profile_menu();"
+                        class="w-full text-left px-4 py-2.5 hover:bg-surface-container-high text-on-surface flex items-center gap-2.5 border-0 bg-transparent cursor-pointer">
+                        <span class="material-symbols-outlined text-[18px]">lock_open</span>
+                        <span>Unblock @{{ user_info.username | e }}</span>
+                      </button>
+                      {% else %}
+                      {% if not is_blocking_me %}
+                      {% if is_muted_by_me %}
+                      <button type="button"
+                        onclick="open_unmute_modal('{{ user_info.username | e }}'); close_profile_menu();"
+                        class="w-full text-left px-4 py-2.5 hover:bg-surface-container-high text-on-surface flex items-center gap-2.5 border-0 bg-transparent cursor-pointer">
+                        <span class="material-symbols-outlined text-[18px]">volume_up</span>
+                        <span>Unmute @{{ user_info.username | e }}</span>
+                      </button>
+                      {% else %}
+                      <button type="button"
+                        onclick="open_mute_modal('{{ user_info.username | e }}'); close_profile_menu();"
+                        class="w-full text-left px-4 py-2.5 hover:bg-surface-container-high text-on-surface flex items-center gap-2.5 border-0 bg-transparent cursor-pointer">
+                        <span class="material-symbols-outlined text-[18px]">volume_off</span>
+                        <span>Mute @{{ user_info.username | e }}</span>
+                      </button>
+                      {% endif %}
+                      <button type="button"
+                        onclick="open_block_modal('{{ user_info.username | e }}'); close_profile_menu();"
+                        class="w-full text-left px-4 py-2.5 hover:bg-error-container text-error flex items-center gap-2.5 border-0 bg-transparent cursor-pointer">
+                        <span class="material-symbols-outlined text-[18px]">block</span>
+                        <span>Block @{{ user_info.username | e }}</span>
+                      </button>
+                      {% endif %}
+                      <button type="button"
+                        onclick="open_report_modal('user', '{{ user_info.username | e }}', '{{ user_info.username | e }}'); close_profile_menu();"
+                        class="w-full text-left px-4 py-2.5 hover:bg-surface-container-high text-on-surface flex items-center gap-2.5 border-0 bg-transparent cursor-pointer">
+                        <span class="material-symbols-outlined text-[18px]">flag</span>
+                        <span>Report User</span>
+                      </button>
+                      {% endif %}
+                    </div>
+                  </div>
+
+                  {% endif %}
                 </div>
               </div>
-              <!-- Profile Actions -->
-              <div class="flex items-center gap-space-sm pt-2">
-                <button class="p-2 sm:px-3 sm:py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface transition-all duration-150 flex items-center gap-1.5 font-label-sm text-label-sm border-0 cursor-pointer" id="share-profile-btn" title="Share Profile">
-                  <span class="material-symbols-outlined text-[18px]">ios_share</span>
-                  <span class="hidden sm:inline">Share</span>
+
+              <!-- Identity Details -->
+              <div class="flex flex-col gap-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <h1 class="font-headline-sm text-headline-sm text-on-surface font-bold tracking-tight"
+                    id="display-profile-name">{{ user_info.profile_name | e }}</h1>
+                  {% if is_muted_by_me %}
+                  <span
+                    class="px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-[11px] font-semibold flex items-center gap-1">
+                    <i class="fa fa-volume-off"></i> Muted
+                  </span>
+                  {% endif %}
+                  {% if is_blocked_by_me %}
+                  <span
+                    class="px-2 py-0.5 rounded-full bg-error-container text-on-error-container font-label-sm text-[11px] font-semibold flex items-center gap-1">
+                    <i class="fa fa-ban"></i> Blocked
+                  </span>
+                  {% endif %}
+                </div>
+                <p class="font-body-sm text-body-sm text-secondary">@{{ user_info.username | e }}</p>
+              </div>
+
+              <!-- Bio -->
+              <p class="font-body-md text-body-md text-on-surface mt-3 leading-relaxed max-w-xl"
+                id="display-profile-info">
+                {{ user_info.profile_info | e if user_info.profile_info else 'No bio provided yet.' }}
+              </p>
+
+              <!-- Stats (Real Data from MongoDB) -->
+              <div
+                class="flex items-center gap-6 mt-4 pt-3 border-t border-surface-container text-on-surface flex-wrap">
+                <div class="flex items-baseline gap-1.5">
+                  <span class="font-headline-sm text-headline-sm font-bold text-on-surface">{{ post_count }}</span>
+                  <span class="font-body-sm text-body-sm text-secondary">Posts</span>
+                </div>
+                <!-- Followers & Following stats linking to lists -->
+                <a href="/user/{{ user_info.username | e }}/followers"
+                  class="flex items-baseline gap-1.5 no-underline hover:underline cursor-pointer text-on-surface">
+                  <span class="font-headline-sm text-headline-sm font-bold text-on-surface"
+                    id="follower-count-display">{{ follower_count }}</span>
+                  <span class="font-body-sm text-body-sm text-secondary">Followers</span>
+                </a>
+                <a href="/user/{{ user_info.username | e }}/following"
+                  class="flex items-baseline gap-1.5 no-underline hover:underline cursor-pointer text-on-surface">
+                  <span class="font-headline-sm text-headline-sm font-bold text-on-surface"
+                    id="following-count-display">{{ following_count }}</span>
+                  <span class="font-body-sm text-body-sm text-secondary">Following</span>
+                </a>
+              </div>
+
+            </div>
+          </div><!-- /.profile header -->
+
+          <!-- ===== EDIT PROFILE FORM (hidden by default, own profile only) ===== -->
+          {% if status %}
+          <div id="edit-profile-form" class="hidden mt-4 bg-surface-container-lowest rounded-xl p-space-md shadow-sm">
+            <h2 class="font-headline-sm text-headline-sm text-on-surface mb-space-md">Edit Profile</h2>
+            <div class="flex flex-col gap-space-md">
+              <div>
+                <label class="font-label-md text-label-md text-on-surface-variant block mb-1" for="edit-name">Display
+                  Name</label>
+                <input id="edit-name" type="text" value="{{ user_info.profile_name | e }}"
+                  class="w-full bg-surface-container-low rounded-lg p-space-sm font-body-md text-body-md text-on-surface border border-outline-variant focus:outline-none focus:ring-1 focus:ring-primary-container" />
+              </div>
+              <div>
+                <label class="font-label-md text-label-md text-on-surface-variant block mb-1"
+                  for="edit-about">Bio</label>
+                <textarea id="edit-about" rows="3"
+                  class="w-full bg-surface-container-low rounded-lg p-space-sm font-body-md text-body-md text-on-surface border border-outline-variant focus:outline-none focus:ring-1 focus:ring-primary-container resize-none">{{ user_info.profile_info | e if user_info.profile_info else '' }}</textarea>
+              </div>
+              <div>
+                <label class="font-label-md text-label-md text-on-surface-variant block mb-1" for="edit-pic">Profile
+                  Picture</label>
+                <input id="edit-pic" type="file" accept="image/*"
+                  class="font-body-sm text-body-sm text-on-surface-variant" />
+              </div>
+              <div class="flex gap-space-sm justify-end">
+                <button id="cancel-edit-btn"
+                  class="px-space-md py-space-xs rounded-full bg-surface-container text-on-surface font-label-md text-label-md hover:bg-surface-container-high transition-all">
+                  Cancel
                 </button>
-                {% if status %}
-                <!-- Own profile: show Edit Profile button -->
-                <button id="edit-profile-btn"
-                        class="px-4 py-1.5 rounded-full bg-surface-container-low hover:bg-surface-container-high text-on-surface font-label-md text-label-md transition-all duration-150 shadow-sm border-0 cursor-pointer">
-                  Edit Profile
+                <button id="save-profile-btn"
+                  class="px-space-md py-space-xs rounded-full bg-primary-container text-on-primary font-label-md text-label-md hover:bg-primary shadow-sm transition-all">
+                  Save Changes
                 </button>
-                {% else %}
-                <!-- Other user's profile: Follow / Following button -->
-                {% if is_following %}
-                <button id="follow-btn"
-                        data-username="{{ user_info.username | e }}"
-                        data-following="true"
-                        class="px-5 py-1.5 rounded-full bg-surface-container-high hover:bg-error-container hover:text-on-error-container text-on-surface font-label-md text-label-md transition-all duration-150 shadow-sm border border-outline-variant cursor-pointer group">
-                  <span class="group-hover:hidden">Following</span>
-                  <span class="hidden group-hover:inline">Unfollow</span>
-                </button>
-                {% else %}
-                <button id="follow-btn"
-                        data-username="{{ user_info.username | e }}"
-                        data-following="false"
-                        class="px-5 py-1.5 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-all duration-150 shadow-sm border-0 cursor-pointer">
-                  Follow
-                </button>
-                {% endif %}
-                {% endif %}
               </div>
             </div>
+          </div>
+          {% endif %}
 
-            <!-- Identity Details -->
-            <div class="flex flex-col gap-1">
-              <div class="flex items-center gap-2 flex-wrap">
-                <h1 class="font-headline-sm text-headline-sm text-on-surface font-bold tracking-tight" id="display-profile-name">{{ user_info.profile_name | e }}</h1>
-              </div>
-              <p class="font-body-sm text-body-sm text-secondary">@{{ user_info.username | e }}</p>
+          {% if is_blocked_by_me %}
+          <!-- ===== BLOCKED BY CURRENT USER NOTICE ===== -->
+          <div
+            class="bg-surface-container-lowest rounded-2xl p-10 text-center shadow-sm mt-4 border border-outline-variant/30">
+            <div
+              class="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center mx-auto mb-4 text-on-surface-variant">
+              <span class="material-symbols-outlined text-[32px]">block</span>
             </div>
-
-            <!-- Bio -->
-            <p class="font-body-md text-body-md text-on-surface mt-3 leading-relaxed max-w-xl" id="display-profile-info">
-              {{ user_info.profile_info | e if user_info.profile_info else 'No bio provided yet.' }}
+            <h2 class="font-headline-sm text-headline-sm font-bold text-on-surface mb-2">Anda telah memblokir @{{
+              user_info.username | e }}</h2>
+            <p class="font-body-md text-body-md text-secondary max-w-md mx-auto mb-6">
+              Anda tidak dapat melihat postingan atau notifikasi dari @{{ user_info.username | e }}, dan mereka tidak
+              dapat berinteraksi dengan profil atau postingan Anda.
             </p>
-
-            <!-- Stats (Real Data from MongoDB) -->
-            <div class="flex items-center gap-6 mt-4 pt-3 border-t border-surface-container text-on-surface flex-wrap">
-              <div class="flex items-baseline gap-1.5">
-                <span class="font-headline-sm text-headline-sm font-bold text-on-surface">{{ post_count }}</span>
-                <span class="font-body-sm text-body-sm text-secondary">Posts</span>
-              </div>
-              <!-- Followers & Following stats linking to lists -->
-              <a href="/user/{{ user_info.username | e }}/followers"
-                 class="flex items-baseline gap-1.5 no-underline hover:underline cursor-pointer text-on-surface">
-                <span class="font-headline-sm text-headline-sm font-bold text-on-surface" id="follower-count-display">{{ follower_count }}</span>
-                <span class="font-body-sm text-body-sm text-secondary">Followers</span>
-              </a>
-              <a href="/user/{{ user_info.username | e }}/following"
-                 class="flex items-baseline gap-1.5 no-underline hover:underline cursor-pointer text-on-surface">
-                <span class="font-headline-sm text-headline-sm font-bold text-on-surface" id="following-count-display">{{ following_count }}</span>
-                <span class="font-body-sm text-body-sm text-secondary">Following</span>
-              </a>
-            </div>
-
+            <button onclick="open_unblock_modal('{{ user_info.username | e }}')"
+              class="px-6 py-2 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md transition-all shadow-sm border-0 cursor-pointer">
+              Buka Blokir @{{ user_info.username | e }}
+            </button>
           </div>
-        </div><!-- /.profile header -->
-
-        <!-- ===== EDIT PROFILE FORM (hidden by default, own profile only) ===== -->
-        {% if status %}
-        <div id="edit-profile-form" class="hidden mt-4 bg-surface-container-lowest rounded-xl p-space-md shadow-sm">
-          <h2 class="font-headline-sm text-headline-sm text-on-surface mb-space-md">Edit Profile</h2>
-          <div class="flex flex-col gap-space-md">
-            <div>
-              <label class="font-label-md text-label-md text-on-surface-variant block mb-1" for="edit-name">Display Name</label>
-              <input id="edit-name" type="text"
-                     value="{{ user_info.profile_name | e }}"
-                     class="w-full bg-surface-container-low rounded-lg p-space-sm font-body-md text-body-md text-on-surface border border-outline-variant focus:outline-none focus:ring-1 focus:ring-primary-container"/>
+          {% elif is_blocking_me %}
+          <!-- ===== BLOCKED BY TARGET USER NOTICE ===== -->
+          <div
+            class="bg-surface-container-lowest rounded-2xl p-10 text-center shadow-sm mt-4 border border-outline-variant/30">
+            <div
+              class="w-16 h-16 rounded-full bg-error-container flex items-center justify-center mx-auto mb-4 text-error">
+              <span class="material-symbols-outlined text-[32px]">lock</span>
             </div>
-            <div>
-              <label class="font-label-md text-label-md text-on-surface-variant block mb-1" for="edit-about">Bio</label>
-              <textarea id="edit-about" rows="3"
-                        class="w-full bg-surface-container-low rounded-lg p-space-sm font-body-md text-body-md text-on-surface border border-outline-variant focus:outline-none focus:ring-1 focus:ring-primary-container resize-none">{{ user_info.profile_info | e if user_info.profile_info else '' }}</textarea>
-            </div>
-            <div>
-              <label class="font-label-md text-label-md text-on-surface-variant block mb-1" for="edit-pic">Profile Picture</label>
-              <input id="edit-pic" type="file" accept="image/*"
-                     class="font-body-sm text-body-sm text-on-surface-variant"/>
-            </div>
-            <div class="flex gap-space-sm justify-end">
-              <button id="cancel-edit-btn"
-                      class="px-space-md py-space-xs rounded-full bg-surface-container text-on-surface font-label-md text-label-md hover:bg-surface-container-high transition-all">
-                Cancel
+            <h2 class="font-headline-sm text-headline-sm font-bold text-on-surface mb-2">Profil Tidak Tersedia</h2>
+            <p class="font-body-md text-body-md text-secondary max-w-md mx-auto">
+              Anda diblokir oleh @{{ user_info.username | e }} dan tidak dapat melihat postingan atau berinteraksi
+              dengan akun ini.
+            </p>
+          </div>
+          {% else %}
+          <!-- ===== PROFILE NAVIGATION TABS ===== -->
+          <div class="relative bg-surface-container-lowest rounded-xl p-1.5 mt-4 mb-4 shadow-sm">
+            <nav class="flex items-center justify-between text-center" id="profile-tabs">
+              <button
+                class="tab-btn flex-1 py-2 rounded-lg font-label-md text-label-md transition-all duration-200 bg-secondary-container text-on-secondary-container font-semibold shadow-sm border-0 cursor-pointer"
+                data-tab="posts">
+                Posts ({{ post_count }})
               </button>
-              <button id="save-profile-btn"
-                      class="px-space-md py-space-xs rounded-full bg-primary-container text-on-primary font-label-md text-label-md hover:bg-primary shadow-sm transition-all">
-                Save Changes
+              <button
+                class="tab-btn flex-1 py-2 rounded-lg font-label-md text-label-md transition-all duration-200 text-secondary hover:text-on-surface hover:bg-surface-container-low border-0 cursor-not-allowed opacity-60"
+                data-tab="replies" title="Coming Soon (TODO)" disabled>
+                Replies
               </button>
+              <button
+                class="tab-btn flex-1 py-2 rounded-lg font-label-md text-label-md transition-all duration-200 text-secondary hover:text-on-surface hover:bg-surface-container-low border-0 cursor-not-allowed opacity-60"
+                data-tab="media" title="Coming Soon (TODO)" disabled>
+                Media
+              </button>
+              <button
+                class="tab-btn flex-1 py-2 rounded-lg font-label-md text-label-md transition-all duration-200 text-secondary hover:text-on-surface hover:bg-surface-container-low border-0 cursor-not-allowed opacity-60"
+                data-tab="likes" title="Coming Soon (TODO)" disabled>
+                Likes
+              </button>
+            </nav>
+          </div>
+
+          <!-- ===== USER POSTS FEED (rendered by myjs.js) ===== -->
+          <div id="post-box" class="flex flex-col gap-3">
+            <div class="text-center text-on-surface-variant py-8 font-body-sm">
+              <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat postingan…
             </div>
           </div>
-        </div>
-        {% endif %}
 
-        <!-- ===== PROFILE NAVIGATION TABS ===== -->
-        <div class="relative bg-surface-container-lowest rounded-xl p-1.5 mt-4 mb-4 shadow-sm">
-          <nav class="flex items-center justify-between text-center" id="profile-tabs">
-            <button class="tab-btn flex-1 py-2 rounded-lg font-label-md text-label-md transition-all duration-200 bg-secondary-container text-on-secondary-container font-semibold shadow-sm border-0 cursor-pointer" data-tab="posts">
-              Posts ({{ post_count }})
-            </button>
-            <button class="tab-btn flex-1 py-2 rounded-lg font-label-md text-label-md transition-all duration-200 text-secondary hover:text-on-surface hover:bg-surface-container-low border-0 cursor-not-allowed opacity-60" data-tab="replies" title="Coming Soon (TODO)" disabled>
-              Replies
-            </button>
-            <button class="tab-btn flex-1 py-2 rounded-lg font-label-md text-label-md transition-all duration-200 text-secondary hover:text-on-surface hover:bg-surface-container-low border-0 cursor-not-allowed opacity-60" data-tab="media" title="Coming Soon (TODO)" disabled>
-              Media
-            </button>
-            <button class="tab-btn flex-1 py-2 rounded-lg font-label-md text-label-md transition-all duration-200 text-secondary hover:text-on-surface hover:bg-surface-container-low border-0 cursor-not-allowed opacity-60" data-tab="likes" title="Coming Soon (TODO)" disabled>
-              Likes
-            </button>
-          </nav>
-        </div>
-
-        <!-- ===== USER POSTS FEED (rendered by myjs.js) ===== -->
-        <div id="post-box" class="flex flex-col gap-3">
-          <div class="text-center text-on-surface-variant py-8 font-body-sm">
-            <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat postingan…
+          <!-- Feed loading spinner for pagination -->
+          <div id="feed-loading" class="hidden text-center py-6 text-on-surface-variant font-body-sm">
+            <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat postingan berikutnya...
           </div>
-        </div>
 
-        <!-- Feed loading spinner for pagination -->
-        <div id="feed-loading" class="hidden text-center py-6 text-on-surface-variant font-body-sm">
-          <i class="fa fa-spinner fa-spin text-xl text-primary mr-2"></i> Memuat postingan berikutnya...
-        </div>
-
-        <!-- Load More Container -->
-        <div id="load-more-container" class="hidden text-center py-6">
-          <button id="load-more-btn"
-                  onclick="load_more_posts()"
-                  class="px-6 py-2.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md text-label-md transition-all duration-150 shadow-sm border border-outline-variant cursor-pointer">
-            Load More
-          </button>
-        </div>
-
-        <!-- End-of-feed marker -->
-        <div class="py-8 flex flex-col items-center justify-center gap-2 text-secondary">
-          <div class="w-8 h-1 rounded-full bg-secondary-container"></div>
-          <span class="font-caption text-caption tracking-widest uppercase text-outline">You're all caught up</span>
-        </div>
-
-      </div>
-    </main>
-  </div>
-
-  <!-- ===== RIGHT SIDEBAR ===== -->
-  <aside class="hidden xl:flex flex-col fixed top-16 right-[max(1rem,calc((100vw-80rem)/2+2.5rem))] h-[calc(100vh-4rem)] w-[320px] z-30 py-space-lg pl-space-md overflow-y-auto">
-    <div class="flex flex-col gap-space-lg">
-      <!-- Search bar (TODO: not yet functional) -->
-      <div class="relative flex items-center">
-        <span class="material-symbols-outlined absolute left-space-md text-on-surface-variant text-[20px]">search</span>
-        <input class="w-full pl-10 pr-space-md py-space-sm bg-surface-container-low rounded-full font-body-sm text-body-sm text-on-surface placeholder:text-on-surface-variant outline-none focus:bg-surface-container-lowest transition-colors"
-               placeholder="Search Sweeter" type="text"/>
-      </div>
-      <!-- Trending (placeholder) -->
-      <div class="p-space-lg bg-surface-container-lowest rounded-xl shadow-[0_4px_16px_-2px_rgba(88,48,48,0.03)]">
-        <h3 class="font-headline-sm text-headline-sm text-on-surface mb-space-md">What's happening</h3>
-        <!-- TODO: Real trending data not yet implemented -->
-        <div class="flex flex-col gap-space-md">
-          <div class="cursor-pointer">
-            <span class="font-caption text-caption text-on-surface-variant">Technology · Trending</span>
-            <p class="font-label-md text-label-md text-on-surface">#WarmMinimalism</p>
-            <span class="font-caption text-caption text-on-surface-variant">24.8K posts</span>
+          <!-- Load More Container -->
+          <div id="load-more-container" class="hidden text-center py-6">
+            <button id="load-more-btn" onclick="load_more_posts()"
+              class="px-6 py-2.5 rounded-full bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md text-label-md transition-all duration-150 shadow-sm border border-outline-variant cursor-pointer">
+              Load More
+            </button>
           </div>
-          <div class="cursor-pointer">
-            <span class="font-caption text-caption text-on-surface-variant">Design · Trending</span>
-            <p class="font-label-md text-label-md text-on-surface">Editorial Layouts</p>
-            <span class="font-caption text-caption text-on-surface-variant">12.3K posts</span>
+
+          <!-- End-of-feed marker -->
+          <div class="py-8 flex flex-col items-center justify-center gap-2 text-secondary">
+            <div class="w-8 h-1 rounded-full bg-secondary-container"></div>
+            <span class="font-caption text-caption tracking-widest uppercase text-outline">You're all caught up</span>
           </div>
-          <div class="cursor-pointer">
-            <span class="font-caption text-caption text-on-surface-variant">Literature · Trending</span>
-            <p class="font-label-md text-label-md text-on-surface">Quiet Web</p>
-            <span class="font-caption text-caption text-on-surface-variant">8,941 posts</span>
-          </div>
+          {% endif %}
+
         </div>
-      </div>
-      <footer class="px-space-sm font-caption text-caption text-on-surface-variant flex flex-wrap gap-x-space-md gap-y-space-xs leading-relaxed">
-        <span>© 2025 Sweeter</span>
-      </footer>
+      </main>
     </div>
-  </aside>
 
-</div><!-- /.max-w-7xl -->
+    <!-- ===== RIGHT SIDEBAR ===== -->
+    <aside
+      class="hidden xl:flex flex-col fixed top-16 right-[max(1rem,calc((100vw-80rem)/2+2.5rem))] h-[calc(100vh-4rem)] w-[320px] z-30 py-space-lg pl-space-md overflow-y-auto">
+      <div class="flex flex-col gap-space-lg">
+        <!-- Search bar (TODO: not yet functional) -->
+        <div class="relative flex items-center">
+          <span
+            class="material-symbols-outlined absolute left-space-md text-on-surface-variant text-[20px]">search</span>
+          <input
+            class="w-full pl-10 pr-space-md py-space-sm bg-surface-container-low rounded-full font-body-sm text-body-sm text-on-surface placeholder:text-on-surface-variant outline-none focus:bg-surface-container-lowest transition-colors"
+            placeholder="Search Sweeter" type="text" />
+        </div>
+        <!-- Trending (placeholder) -->
+        <div class="p-space-lg bg-surface-container-lowest rounded-xl shadow-[0_4px_16px_-2px_rgba(88,48,48,0.03)]">
+          <h3 class="font-headline-sm text-headline-sm text-on-surface mb-space-md">What's happening</h3>
+          <!-- TODO: Real trending data not yet implemented -->
+          <div class="flex flex-col gap-space-md">
+            <div class="cursor-pointer">
+              <span class="font-caption text-caption text-on-surface-variant">Technology · Trending</span>
+              <p class="font-label-md text-label-md text-on-surface">#WarmMinimalism</p>
+              <span class="font-caption text-caption text-on-surface-variant">24.8K posts</span>
+            </div>
+            <div class="cursor-pointer">
+              <span class="font-caption text-caption text-on-surface-variant">Design · Trending</span>
+              <p class="font-label-md text-label-md text-on-surface">Editorial Layouts</p>
+              <span class="font-caption text-caption text-on-surface-variant">12.3K posts</span>
+            </div>
+            <div class="cursor-pointer">
+              <span class="font-caption text-caption text-on-surface-variant">Literature · Trending</span>
+              <p class="font-label-md text-label-md text-on-surface">Quiet Web</p>
+              <span class="font-caption text-caption text-on-surface-variant">8,941 posts</span>
+            </div>
+          </div>
+        </div>
+        <footer
+          class="px-space-sm font-caption text-caption text-on-surface-variant flex flex-wrap gap-x-space-md gap-y-space-xs leading-relaxed">
+          <span>© 2025 Sweeter</span>
+        </footer>
+      </div>
+    </aside>
 
-<!-- ===== SWEETER DYNAMIC JS ===== -->
-<script src="{{ url_for('static', filename='myjs.js') }}"></script>
+  </div><!-- /.max-w-7xl -->
 
-<script>
-  $(document).ready(function () {
+  <!-- ===== SWEETER DYNAMIC JS ===== -->
+  <script src="{{ url_for('static', filename='myjs.js') }}"></script>
 
-    // Load this user's posts (filtered by username)
-    get_posts('{{ user_info.username | e }}');
+  <script>
+    function toggle_profile_menu(e) {
+      if (e) e.stopPropagation();
+      $('#profile-more-dropdown').toggleClass('hidden');
+    }
 
-    // Share profile button
-    $('#share-profile-btn').on('click', function () {
-      var shareUrl = window.location.href;
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(shareUrl).then(function () {
-          var $btn = $('#share-profile-btn');
-          var originalHtml = $btn.html();
-          $btn.html('<span class="material-symbols-outlined text-[18px]">check</span><span class="hidden sm:inline">Copied!</span>');
-          setTimeout(function () {
-            $btn.html(originalHtml);
-          }, 2000);
-        });
-      } else {
-        prompt('Copy profile link:', shareUrl);
+    function close_profile_menu() {
+      $('#profile-more-dropdown').addClass('hidden');
+    }
+
+    $(document).on('click', function (e) {
+      if (!$(e.target).closest('#profile-more-menu-container').length) {
+        close_profile_menu();
       }
     });
 
-    // Follow / Unfollow button handler
-    $('#follow-btn').on('click', function () {
-      var targetUsername = $(this).attr('data-username');
-      toggle_follow(targetUsername, '#follow-btn', '#follower-count-display');
-    });
+    $(document).ready(function () {
 
-    {% if status %}
-    // ---- Edit Profile (own profile only) ----
-    $('#edit-profile-btn').on('click', function () {
-      $('#edit-profile-form').toggleClass('hidden');
-    });
+      {% if not is_blocked_by_me and not is_blocking_me %}
+      // Load this user's posts (filtered by username)
+      get_posts('{{ user_info.username | e }}');
+      {% endif %}
 
-    $('#cancel-edit-btn').on('click', function () {
-      $('#edit-profile-form').addClass('hidden');
-    });
-
-    $('#save-profile-btn').on('click', function () {
-      var name = $('#edit-name').val().trim();
-      var about = $('#edit-about').val().trim();
-      var file = $('#edit-pic')[0].files[0];
-
-      if (!name) {
-        alert('Display name cannot be empty.');
-        return;
-      }
-
-      var formData = new FormData();
-      formData.append('name_give', name);
-      formData.append('about_give', about);
-      if (file) {
-        formData.append('file_give', file);
-      }
-
-      $.ajax({
-        type: 'POST',
-        url: '/update_profile',
-        data: formData,
-        contentType: false,
-        processData: false,
-        success: function (response) {
-          if (response.result === 'success') {
-            // Update displayed name & bio without reload
-            $('#display-profile-name').text(name);
-            $('#display-profile-info').text(about);
-            if (file) {
-              var reader = new FileReader();
-              reader.onload = function (e) {
-                $('#profile-avatar').attr('src', e.target.result);
-              };
-              reader.readAsDataURL(file);
-            }
-            $('#edit-profile-form').addClass('hidden');
-            alert('Profile updated successfully!');
-          } else {
-            alert('Failed to update profile: ' + (response.msg || 'Unknown error'));
-          }
-        },
-        error: function (xhr) {
-          if (xhr.status === 401 || xhr.status === 302) {
-            window.location.href = '/login';
-          } else {
-            alert('An error occurred while saving profile.');
-          }
+      // Share profile button
+      $('#share-profile-btn').on('click', function () {
+        var shareUrl = window.location.href;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(shareUrl).then(function () {
+            var $btn = $('#share-profile-btn');
+            var originalHtml = $btn.html();
+            $btn.html('<span class="material-symbols-outlined text-[18px]">check</span><span class="hidden sm:inline">Copied!</span>');
+            setTimeout(function () {
+              $btn.html(originalHtml);
+            }, 2000);
+          });
+        } else {
+          prompt('Copy profile link:', shareUrl);
         }
       });
+
+      // Follow / Unfollow button handler
+      $('#follow-btn').on('click', function () {
+        var targetUsername = $(this).attr('data-username');
+        toggle_follow(targetUsername, '#follow-btn', '#follower-count-display');
+      });
+
+      {% if status %}
+      // ---- Edit Profile (own profile only) ----
+      $('#edit-profile-btn').on('click', function () {
+        $('#edit-profile-form').toggleClass('hidden');
+      });
+
+      $('#cancel-edit-btn').on('click', function () {
+        $('#edit-profile-form').addClass('hidden');
+      });
+
+      $('#save-profile-btn').on('click', function () {
+        var name = $('#edit-name').val().trim();
+        var about = $('#edit-about').val().trim();
+        var file = $('#edit-pic')[0].files[0];
+
+        if (!name) {
+          alert('Display name cannot be empty.');
+          return;
+        }
+
+        var formData = new FormData();
+        formData.append('name_give', name);
+        formData.append('about_give', about);
+        if (file) {
+          formData.append('file_give', file);
+        }
+
+        $.ajax({
+          type: 'POST',
+          url: '/update_profile',
+          data: formData,
+          contentType: false,
+          processData: false,
+          success: function (response) {
+            if (response.result === 'success') {
+              $('#display-profile-name').text(name);
+              $('#display-profile-info').text(about);
+              if (file) {
+                var reader = new FileReader();
+                reader.onload = function (e) {
+                  $('#profile-avatar').attr('src', e.target.result);
+                };
+                reader.readAsDataURL(file);
+              }
+              $('#edit-profile-form').addClass('hidden');
+              alert('Profile updated successfully!');
+            } else {
+              alert('Failed to update profile: ' + (response.msg || 'Unknown error'));
+            }
+          },
+          error: function (xhr) {
+            if (xhr.status === 401 || xhr.status === 302) {
+              window.location.href = '/login';
+            } else {
+              alert('An error occurred while saving profile.');
+            }
+          }
+        });
+      });
+      {% endif %}
+
     });
-    {% endif %}
+  </script>
 
-  });
-</script>
-
-<!-- Quote Post Modal -->
-<div id="quote-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-  <div class="bg-surface-container-lowest rounded-2xl w-full max-w-lg shadow-xl border border-outline-variant/30 overflow-hidden flex flex-col max-h-[90vh]">
-    <div class="flex items-center justify-between px-5 py-3.5 border-b border-surface-container-high">
-      <h3 class="font-headline-sm text-[17px] font-bold text-on-surface m-0">Kutip Postingan</h3>
-      <button type="button" onclick="close_quote_modal()" class="p-1 rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors border-0 bg-transparent cursor-pointer">
-        <span class="material-symbols-outlined text-[20px]">close</span>
-      </button>
-    </div>
-    <div class="p-5 overflow-y-auto flex-1">
-      <input type="hidden" id="quote-target-id" value="" />
-      <textarea id="quote-textarea"
-                class="w-full bg-surface-container-low rounded-xl p-3 font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary-container resize-none transition-all"
-                rows="3"
-                maxlength="5000"
-                placeholder="Tambahkan komentar Anda..."></textarea>
-      
-      <div id="quote-preview-card" class="mt-3 p-3.5 rounded-xl border border-outline-variant/50 bg-surface-container-low/60">
-        <div class="flex items-center gap-2 mb-1.5">
-          <img id="quote-preview-avatar" class="w-6 h-6 rounded-full object-cover shrink-0" src="/static/profile_pics/profile_placeholder.png" alt=""/>
-          <span id="quote-preview-name" class="font-label-sm font-semibold text-on-surface"></span>
-          <span id="quote-preview-username" class="font-caption text-on-surface-variant"></span>
-        </div>
-        <p id="quote-preview-comment" class="font-body-sm text-on-surface whitespace-pre-wrap leading-relaxed line-clamp-3 m-0"></p>
+  <!-- Block Confirmation Modal -->
+  <div id="block-modal"
+    class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div class="bg-surface-container-lowest rounded-2xl w-full max-w-sm shadow-xl border border-outline-variant/30 p-6">
+      <h3 class="font-headline-sm text-headline-sm font-bold text-on-surface mb-2" id="block-modal-title">Blokir
+        Pengguna?</h3>
+      <p class="font-body-sm text-body-sm text-secondary mb-6 leading-relaxed" id="block-modal-desc">
+        Pengguna ini tidak akan dapat mengikuti Anda atau melihat postingan Anda. Setiap relasi follow yang ada akan
+        dihapus secara otomatis.
+      </p>
+      <div class="flex items-center justify-end gap-3">
+        <button type="button" onclick="close_block_modal()"
+          class="px-4 py-2 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container transition-colors border-0 bg-transparent cursor-pointer">
+          Batal
+        </button>
+        <button type="button" id="confirm-block-btn"
+          class="px-5 py-2 rounded-full bg-error text-on-error hover:opacity-90 font-label-md text-label-md transition-colors border-0 cursor-pointer shadow-sm">
+          Blokir
+        </button>
       </div>
     </div>
-    <div class="flex items-center justify-end gap-2 px-5 py-3 border-t border-surface-container-high bg-surface-container-low/30">
-      <button type="button" onclick="close_quote_modal()" class="px-4 py-1.5 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container-high transition-colors border-0 bg-transparent cursor-pointer">
-        Batal
-      </button>
-      <button type="button" id="btn-submit-quote" onclick="submit_quote_post()" class="px-5 py-1.5 rounded-full bg-primary-container text-on-primary font-label-md text-label-md hover:bg-primary transition-colors border-0 cursor-pointer shadow-sm">
-        Kirim Kutipan
-      </button>
+  </div>
+
+  <!-- Unblock Confirmation Modal -->
+  <div id="unblock-modal"
+    class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div class="bg-surface-container-lowest rounded-2xl w-full max-w-sm shadow-xl border border-outline-variant/30 p-6">
+      <h3 class="font-headline-sm text-headline-sm font-bold text-on-surface mb-2" id="unblock-modal-title">Buka Blokir
+        Pengguna?</h3>
+      <p class="font-body-sm text-body-sm text-secondary mb-6 leading-relaxed" id="unblock-modal-desc">
+        Pengguna ini akan dapat melihat profil dan postingan Anda kembali. Membuka blokir tidak otomatis mengembalikan
+        relasi follow sebelumnya.
+      </p>
+      <div class="flex items-center justify-end gap-3">
+        <button type="button" onclick="close_unblock_modal()"
+          class="px-4 py-2 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container transition-colors border-0 bg-transparent cursor-pointer">
+          Batal
+        </button>
+        <button type="button" id="confirm-unblock-btn"
+          class="px-5 py-2 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-colors border-0 cursor-pointer shadow-sm">
+          Buka Blokir
+        </button>
+      </div>
     </div>
   </div>
-</div>
+
+  <!-- Mute Confirmation Modal -->
+  <div id="mute-modal"
+    class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div class="bg-surface-container-lowest rounded-2xl w-full max-w-sm shadow-xl border border-outline-variant/30 p-6">
+      <h3 class="font-headline-sm text-headline-sm font-bold text-on-surface mb-2" id="mute-modal-title">Mute Pengguna?
+      </h3>
+      <p class="font-body-sm text-body-sm text-secondary mb-6 leading-relaxed" id="mute-modal-desc">
+        Postingan dan repost dari akun ini tidak akan muncul di timeline Anda. Pengguna tidak akan tahu bahwa mereka
+        di-mute.
+      </p>
+      <div class="flex items-center justify-end gap-3">
+        <button type="button" onclick="close_mute_modal()"
+          class="px-4 py-2 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container transition-colors border-0 bg-transparent cursor-pointer">
+          Batal
+        </button>
+        <button type="button" id="confirm-mute-btn"
+          class="px-5 py-2 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-colors border-0 cursor-pointer shadow-sm">
+          Mute
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Unmute Confirmation Modal -->
+  <div id="unmute-modal"
+    class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div class="bg-surface-container-lowest rounded-2xl w-full max-w-sm shadow-xl border border-outline-variant/30 p-6">
+      <h3 class="font-headline-sm text-headline-sm font-bold text-on-surface mb-2" id="unmute-modal-title">Buka Mute
+        Pengguna?</h3>
+      <p class="font-body-sm text-body-sm text-secondary mb-6 leading-relaxed" id="unmute-modal-desc">
+        Postingan dari akun ini akan kembali muncul di timeline Anda.
+      </p>
+      <div class="flex items-center justify-end gap-3">
+        <button type="button" onclick="close_unmute_modal()"
+          class="px-4 py-2 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container transition-colors border-0 bg-transparent cursor-pointer">
+          Batal
+        </button>
+        <button type="button" id="confirm-unmute-btn"
+          class="px-5 py-2 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-colors border-0 cursor-pointer shadow-sm">
+          Buka Mute
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Report Content / User Modal -->
+  <div id="report-modal"
+    class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div
+      class="bg-surface-container-lowest rounded-2xl w-full max-w-md shadow-xl border border-outline-variant/30 p-6 flex flex-col gap-4">
+      <div class="flex items-center justify-between">
+        <h3 class="font-headline-sm text-headline-sm font-bold text-on-surface m-0" id="report-modal-title">Laporkan
+          Konten</h3>
+        <button type="button" onclick="close_report_modal()"
+          class="p-1 rounded-full text-on-surface-variant hover:bg-surface-container transition-colors border-0 bg-transparent cursor-pointer">
+          <span class="material-symbols-outlined text-[20px]">close</span>
+        </button>
+      </div>
+
+      <input type="hidden" id="report-target-type" value="" />
+      <input type="hidden" id="report-target-id" value="" />
+
+      <p class="font-body-sm text-body-sm text-secondary m-0" id="report-modal-target-desc"></p>
+
+      <div>
+        <label class="font-label-md text-label-md text-on-surface font-semibold block mb-2">Pilih Alasan
+          Pelaporan</label>
+        <select id="report-reason-select"
+          class="w-full bg-surface-container-low rounded-xl p-3 font-body-sm text-body-sm text-on-surface border border-outline-variant outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary-container">
+          <option value="spam">Spam</option>
+          <option value="harassment">Pelecehan atau Perundungan (Harassment)</option>
+          <option value="hate_speech">Ujaran Kebencian (Hate Speech)</option>
+          <option value="inappropriate_content">Konten Tidak Pantas (Inappropriate Content)</option>
+          <option value="impersonation">Peniruan Identitas (Impersonation)</option>
+          <option value="misinformation">Informasi Palsu / Menyesatkan (Misinformation)</option>
+          <option value="other">Lainnya (Other)</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="font-label-md text-label-md text-on-surface font-semibold block mb-1">Keterangan Tambahan
+          (Opsional)</label>
+        <textarea id="report-description" rows="3" maxlength="1000"
+          class="w-full bg-surface-container-low rounded-xl p-3 font-body-sm text-body-sm text-on-surface border border-outline-variant outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary-container resize-none"
+          placeholder="Jelaskan secara singkat masalah pada konten ini..."></textarea>
+      </div>
+
+      <div class="flex items-center justify-end gap-3 pt-2 border-t border-surface-container-high">
+        <button type="button" onclick="close_report_modal()"
+          class="px-4 py-2 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container transition-colors border-0 bg-transparent cursor-pointer">
+          Batal
+        </button>
+        <button type="button" id="confirm-submit-report-btn" onclick="submit_report_form()"
+          class="px-5 py-2 rounded-full bg-error text-on-error hover:opacity-90 font-label-md text-label-md transition-colors border-0 cursor-pointer shadow-sm">
+          Kirim Laporan
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quote Post Modal -->
+  <div id="quote-modal"
+    class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div
+      class="bg-surface-container-lowest rounded-2xl w-full max-w-lg shadow-xl border border-outline-variant/30 overflow-hidden flex flex-col max-h-[90vh]">
+      <div class="flex items-center justify-between px-5 py-3.5 border-b border-surface-container-high">
+        <h3 class="font-headline-sm text-[17px] font-bold text-on-surface m-0">Kutip Postingan</h3>
+        <button type="button" onclick="close_quote_modal()"
+          class="p-1 rounded-full text-on-surface-variant hover:bg-surface-container-high transition-colors border-0 bg-transparent cursor-pointer">
+          <span class="material-symbols-outlined text-[20px]">close</span>
+        </button>
+      </div>
+      <div class="p-5 overflow-y-auto flex-1">
+        <input type="hidden" id="quote-target-id" value="" />
+        <textarea id="quote-textarea"
+          class="w-full bg-surface-container-low rounded-xl p-3 font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary-container resize-none transition-all"
+          rows="3" maxlength="5000" placeholder="Tambahkan komentar Anda..."></textarea>
+
+        <div id="quote-preview-card"
+          class="mt-3 p-3.5 rounded-xl border border-outline-variant/50 bg-surface-container-low/60">
+          <div class="flex items-center gap-2 mb-1.5">
+            <img id="quote-preview-avatar" class="w-6 h-6 rounded-full object-cover shrink-0"
+              src="/static/profile_pics/profile_placeholder.png" alt="" />
+            <span id="quote-preview-name" class="font-label-sm font-semibold text-on-surface"></span>
+            <span id="quote-preview-username" class="font-caption text-on-surface-variant"></span>
+          </div>
+          <p id="quote-preview-comment"
+            class="font-body-sm text-on-surface whitespace-pre-wrap leading-relaxed line-clamp-3 m-0"></p>
+        </div>
+      </div>
+      <div
+        class="flex items-center justify-end gap-2 px-5 py-3 border-t border-surface-container-high bg-surface-container-low/30">
+        <button type="button" onclick="close_quote_modal()"
+          class="px-4 py-1.5 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container-high transition-colors border-0 bg-transparent cursor-pointer">
+          Batal
+        </button>
+        <button type="button" id="btn-submit-quote" onclick="submit_quote_post()"
+          class="px-5 py-1.5 rounded-full bg-primary-container text-on-primary font-label-md text-label-md hover:bg-primary transition-colors border-0 cursor-pointer shadow-sm">
+          Kirim Kutipan
+        </button>
+      </div>
+    </div>
+  </div>
 
 </body>
+
 </html>

@@ -108,6 +108,22 @@ def init_indexes():
         db.community_requests.create_index([("user_id", 1), ("status", 1), ("created_at", -1)])
         # 30. Compound index postingan komunitas
         db.posts.create_index([("community_id", 1), ("date", -1)])
+        # 31. Compound unique index pada db.blocks: mencegah duplicate block
+        db.blocks.create_index([("blocker", 1), ("blocked", 1)], unique=True)
+        db.blocks.create_index([("blocker", 1)])
+        db.blocks.create_index([("blocked", 1)])
+        # 32. Compound unique index pada db.mutes: mencegah duplicate mute
+        db.mutes.create_index([("muter", 1), ("muted", 1)], unique=True)
+        db.mutes.create_index([("muter", 1)])
+        db.mutes.create_index([("muted", 1)])
+        # 33. Indexes untuk db.reports
+        db.reports.create_index([("status", 1), ("created_at", -1)])
+        db.reports.create_index([("reporter_id", 1), ("target_id", 1), ("status", 1)])
+        db.reports.create_index([("target_type", 1), ("target_id", 1)])
+        db.reports.create_index([("created_at", -1)])
+        # 34. Indexes untuk db.moderation_logs (Audit Trail)
+        db.moderation_logs.create_index([("created_at", -1)])
+        db.moderation_logs.create_index([("admin_id", 1), ("created_at", -1)])
     except Exception as e:
         print(f"Warning saat inisialisasi index MongoDB: {e}")
 
@@ -262,7 +278,9 @@ def get_suggested_users(current_username: str, limit: int = 5) -> list:
         return []
 
     my_following = set(db.follows.distinct('following', {'follower': current_username}))
-    exclude_users = my_following | {current_username}
+    blocked_related = get_all_blocked_relation_usernames(current_username)
+    muted_users = set(get_muted_usernames(current_username))
+    exclude_users = my_following | {current_username} | blocked_related | muted_users
 
     suggested = []
     seen_usernames = set()
@@ -362,3 +380,62 @@ def get_suggested_users(current_username: str, limit: int = 5) -> list:
             })
 
     return suggested
+
+
+def is_blocked(blocker: str, blocked: str) -> bool:
+    """Memeriksa apakah blocker memblokir blocked."""
+    if not blocker or not blocked:
+        return False
+    return bool(db.blocks.find_one({"blocker": blocker, "blocked": blocked}))
+
+
+def has_block_relation(user_a: str, user_b: str) -> bool:
+    """Memeriksa apakah terdapat relasi block dua arah (A blokir B ATAU B blokir A)."""
+    if not user_a or not user_b:
+        return False
+    if user_a == user_b:
+        return False
+    return bool(db.blocks.find_one({
+        "$or": [
+            {"blocker": user_a, "blocked": user_b},
+            {"blocker": user_b, "blocked": user_a}
+        ]
+    }))
+
+
+def get_blocked_usernames(username: str) -> list:
+    """Mengambil daftar username yang diblokir oleh pengguna."""
+    if not username:
+        return []
+    return db.blocks.distinct("blocked", {"blocker": username})
+
+
+def get_blocking_usernames(username: str) -> list:
+    """Mengambil daftar username yang memblokir pengguna ini."""
+    if not username:
+        return []
+    return db.blocks.distinct("blocker", {"blocked": username})
+
+
+def get_all_blocked_relation_usernames(username: str) -> set:
+    """Mengambil himpunan username yang diblokir ATAU memblokir pengguna ini."""
+    if not username:
+        return set()
+    blocked = set(db.blocks.distinct("blocked", {"blocker": username}))
+    blockers = set(db.blocks.distinct("blocker", {"blocked": username}))
+    return blocked | blockers
+
+
+def is_muted(muter: str, muted: str) -> bool:
+    """Memeriksa apakah muter telah me-mute muted."""
+    if not muter or not muted:
+        return False
+    return bool(db.mutes.find_one({"muter": muter, "muted": muted}))
+
+
+def get_muted_usernames(username: str) -> list:
+    """Mengambil daftar username yang di-mute oleh pengguna."""
+    if not username:
+        return []
+    return db.mutes.distinct("muted", {"muter": username})
+

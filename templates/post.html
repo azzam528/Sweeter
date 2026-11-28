@@ -179,6 +179,20 @@
           </div>
           <span id="nav-unread-badge" class="hidden bg-primary-container text-on-primary text-caption font-bold px-2 py-0.5 rounded-full text-[11px] leading-tight"></span>
         </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/blocked">
+          <span class="material-symbols-outlined text-[22px]">block</span>
+          <span class="font-label-md text-label-md">Blocked</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/muted">
+          <span class="material-symbols-outlined text-[22px]">volume_off</span>
+          <span class="font-label-md text-label-md">Muted</span>
+        </a>
+        {% if is_admin %}
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-error-container hover:text-error transition-all no-underline font-semibold" href="/admin/reports">
+          <span class="material-symbols-outlined text-[22px]">admin_panel_settings</span>
+          <span class="font-label-md text-label-md">Moderation</span>
+        </a>
+        {% endif %}
       </nav>
       <!-- Create Post button — scrolls/focuses composer textarea -->
       <button id="open-create-post-btn"
@@ -460,6 +474,50 @@
       </button>
       <button type="button" id="btn-submit-quote" onclick="submit_quote_post()" class="px-5 py-1.5 rounded-full bg-primary-container text-on-primary font-label-md text-label-md hover:bg-primary transition-colors border-0 cursor-pointer shadow-sm">
         Kirim Kutipan
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Report Content / User Modal -->
+<div id="report-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+  <div class="bg-surface-container-lowest rounded-2xl w-full max-w-md shadow-xl border border-outline-variant/30 p-6 flex flex-col gap-4">
+    <div class="flex items-center justify-between">
+      <h3 class="font-headline-sm text-headline-sm font-bold text-on-surface m-0" id="report-modal-title">Laporkan Konten</h3>
+      <button type="button" onclick="close_report_modal()" class="p-1 rounded-full text-on-surface-variant hover:bg-surface-container transition-colors border-0 bg-transparent cursor-pointer">
+        <span class="material-symbols-outlined text-[20px]">close</span>
+      </button>
+    </div>
+
+    <input type="hidden" id="report-target-type" value=""/>
+    <input type="hidden" id="report-target-id" value=""/>
+
+    <p class="font-body-sm text-body-sm text-secondary m-0" id="report-modal-target-desc"></p>
+
+    <div>
+      <label class="font-label-md text-label-md text-on-surface font-semibold block mb-2">Pilih Alasan Pelaporan</label>
+      <select id="report-reason-select" class="w-full bg-surface-container-low rounded-xl p-3 font-body-sm text-body-sm text-on-surface border border-outline-variant outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary-container">
+        <option value="spam">Spam</option>
+        <option value="harassment">Pelecehan atau Perundungan (Harassment)</option>
+        <option value="hate_speech">Ujaran Kebencian (Hate Speech)</option>
+        <option value="inappropriate_content">Konten Tidak Pantas (Inappropriate Content)</option>
+        <option value="impersonation">Peniruan Identitas (Impersonation)</option>
+        <option value="misinformation">Informasi Palsu / Menyesatkan (Misinformation)</option>
+        <option value="other">Lainnya (Other)</option>
+      </select>
+    </div>
+
+    <div>
+      <label class="font-label-md text-label-md text-on-surface font-semibold block mb-1">Keterangan Tambahan (Opsional)</label>
+      <textarea id="report-description" rows="3" maxlength="1000" class="w-full bg-surface-container-low rounded-xl p-3 font-body-sm text-body-sm text-on-surface border border-outline-variant outline-none focus:bg-surface-container-lowest focus:ring-1 focus:ring-primary-container resize-none" placeholder="Jelaskan secara singkat masalah pada konten ini..."></textarea>
+    </div>
+
+    <div class="flex items-center justify-end gap-3 pt-2 border-t border-surface-container-high">
+      <button type="button" onclick="close_report_modal()" class="px-4 py-2 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container transition-colors border-0 bg-transparent cursor-pointer">
+        Batal
+      </button>
+      <button type="button" id="confirm-submit-report-btn" onclick="submit_report_form()" class="px-5 py-2 rounded-full bg-error text-on-error hover:opacity-90 font-label-md text-label-md transition-colors border-0 cursor-pointer shadow-sm">
+        Kirim Laporan
       </button>
     </div>
   </div>
