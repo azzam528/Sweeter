@@ -98,10 +98,36 @@ def create_notification(
         if existing:
             return str(existing['_id'])
 
+    # 6. Deduplikasi Permintaan Follow (Follow Request)
+    elif notif_type == 'follow_request':
+        existing = db.notifications.find_one({
+            'recipient': recipient,
+            'actor': actor,
+            'type': 'follow_request',
+            'is_read': False
+        })
+        if existing:
+            return str(existing['_id'])
+
+    # 7. Deduplikasi Penerimaan Permintaan Follow (Follow Request Accepted)
+    elif notif_type == 'follow_request_accepted':
+        existing = db.notifications.find_one({
+            'recipient': recipient,
+            'actor': actor,
+            'type': 'follow_request_accepted',
+            'is_read': False
+        })
+        if existing:
+            return str(existing['_id'])
+
     # Generate pesan default jika tidak disertakan
     if not message:
         if notif_type == 'follow':
             message = "mulai mengikuti Anda."
+        elif notif_type == 'follow_request':
+            message = "mengirimkan permintaan untuk mengikuti Anda."
+        elif notif_type == 'follow_request_accepted':
+            message = "menyetujui permintaan mengikuti Anda."
         elif notif_type == 'reaction':
             reaction_label = 'reaksi'
             if action_type in ['heart', 'like']:

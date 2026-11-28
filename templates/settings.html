@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pengaturan & Privasi | Sweeter</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"/>
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css"/>
+  <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            "surface-container-highest": "#e3e2e0", "surface-dim": "#dbdad8",
+            "background": "#faf9f7", "surface-container-high": "#e9e8e6",
+            "on-primary": "#ffffff", "on-secondary-fixed-variant": "#4e4542",
+            "on-primary-fixed": "#321112", "primary-fixed": "#ffdad9",
+            "on-surface-variant": "#514443", "on-error-container": "#93000a",
+            "on-tertiary-fixed": "#2f1314", "inverse-on-surface": "#f1f1ef",
+            "secondary-container": "#ecdcd8", "error": "#ba1a1a",
+            "tertiary-fixed": "#ffdad9", "outline": "#837373",
+            "on-secondary-fixed": "#211a18", "surface-tint": "#805252",
+            "inverse-primary": "#f3b8b7", "primary-fixed-dim": "#f3b8b7",
+            "on-background": "#1a1c1b", "inverse-surface": "#2f3130",
+            "on-tertiary-fixed-variant": "#613d3d", "secondary-fixed": "#eedfdb",
+            "on-error": "#ffffff", "surface-container-lowest": "#ffffff",
+            "on-tertiary": "#ffffff", "on-tertiary-container": "#c99a99",
+            "primary-container": "#583030", "surface": "#faf9f7",
+            "surface-container": "#efeeec", "tertiary-container": "#543232",
+            "surface-container-low": "#f4f3f1", "secondary": "#675c59",
+            "on-surface": "#1a1c1b", "tertiary-fixed-dim": "#ecbab9",
+            "on-secondary-container": "#6b605d", "secondary-fixed-dim": "#d2c3c0",
+            "surface-variant": "#e3e2e0", "surface-bright": "#faf9f7",
+            "on-primary-fixed-variant": "#653b3b", "primary": "#3e1b1b",
+            "error-container": "#ffdad6", "on-secondary": "#ffffff",
+            "outline-variant": "#d5c2c1", "on-primary-container": "#cf9897",
+            "tertiary": "#3b1d1d"
+          },
+          borderRadius: { DEFAULT: "0.25rem", lg: "0.5rem", xl: "0.75rem", full: "9999px" },
+          spacing: {
+            "gutter-desktop": "2rem", "space-md": "1rem", "margin-desktop": "2.5rem",
+            "margin-tablet": "1.5rem", "margin": "1rem", "space-xs": "0.25rem",
+            "gutter": "1.25rem", "space-2xl": "3rem", "space-xl": "2rem",
+            "space-lg": "1.5rem", "space-sm": "0.5rem"
+          },
+          fontFamily: {
+            "body-md": ["Manrope"], "headline-sm": ["Manrope"], "label-md": ["Manrope"]
+          }
+        }
+      }
+    };
+  </script>
+</head>
+
+<body class="bg-background font-body-md text-body-md text-on-surface antialiased min-h-screen">
+
+<!-- ===== HEADER ===== -->
+<header class="fixed top-0 left-0 right-0 z-40 bg-surface/80 backdrop-blur-xl shadow-[0_1px_8px_rgba(88,48,48,0.04)]">
+  <div class="h-16 max-w-7xl mx-auto px-4 md:px-margin-desktop flex items-center justify-between">
+    <div class="flex items-center gap-space-sm">
+      <a href="/" class="font-headline-sm text-headline-sm text-primary font-bold tracking-tight no-underline">Sweeter</a>
+    </div>
+    <div class="flex items-center gap-space-md">
+      <div class="flex items-center gap-space-sm">
+        <span class="font-label-md text-label-md text-on-surface hidden sm:inline-block">{{ user_info.profile_name | e }}</span>
+        <a href="/user/{{ user_info.username | e }}">
+          <img alt="Profile" class="w-8 h-8 rounded-full object-cover cursor-pointer"
+               src="/static/{{ user_info.profile_pic_real | e }}"
+               onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+        </a>
+      </div>
+      <form action="/sign_out" method="post" class="inline m-0">
+        <button type="submit" class="px-space-md py-space-xs text-on-surface-variant hover:text-on-surface transition-colors font-label-md text-label-md rounded-full hover:bg-surface-container border-0 bg-transparent cursor-pointer">
+          Sign Out
+        </button>
+      </form>
+    </div>
+  </div>
+</header>
+
+<div class="max-w-7xl mx-auto px-4 md:px-margin-desktop">
+  <!-- ===== LEFT SIDEBAR ===== -->
+  <aside class="hidden md:flex fixed top-16 left-[max(1rem,calc((100vw-80rem)/2+2.5rem))] h-[calc(100vh-4rem)] w-[240px] z-30 flex-col justify-between py-space-lg pr-space-md bg-transparent">
+    <div class="flex flex-col gap-space-lg">
+      <nav class="flex flex-col gap-space-xs">
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/">
+          <span class="material-symbols-outlined text-[22px]">home</span>
+          <span class="font-label-md text-label-md">Home</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/explore">
+          <span class="material-symbols-outlined text-[22px]">explore</span>
+          <span class="font-label-md text-label-md">Explore</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/notifications">
+          <span class="material-symbols-outlined text-[22px]">notifications</span>
+          <span class="font-label-md text-label-md">Notifications</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full bg-secondary-container text-on-secondary-container font-semibold transition-all no-underline" href="/settings">
+          <span class="material-symbols-outlined text-[22px]">settings</span>
+          <span class="font-label-md text-label-md">Pengaturan</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/blocked">
+          <span class="material-symbols-outlined text-[22px]">block</span>
+          <span class="font-label-md text-label-md">Blocked Accounts</span>
+        </a>
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline" href="/muted">
+          <span class="material-symbols-outlined text-[22px]">volume_off</span>
+          <span class="font-label-md text-label-md">Muted Accounts</span>
+        </a>
+        {% if is_admin %}
+        <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-error-container hover:text-error transition-all no-underline font-semibold" href="/admin/reports">
+          <span class="material-symbols-outlined text-[22px]">admin_panel_settings</span>
+          <span class="font-label-md text-label-md">Moderation</span>
+        </a>
+        {% endif %}
+      </nav>
+    </div>
+  </aside>
+
+  <!-- ===== MAIN CONTENT ===== -->
+  <div class="pl-0 md:pl-[264px] min-h-screen">
+    <main class="relative pt-20 bg-transparent max-w-[680px] mx-auto min-h-screen pb-16">
+      
+      <!-- Page Title -->
+      <div class="mb-6">
+        <div class="flex items-center gap-2 mb-1">
+          <a href="javascript:history.back()" class="p-1.5 rounded-full hover:bg-surface-container transition-colors text-on-surface-variant mr-1">
+            <span class="material-symbols-outlined text-[20px]">arrow_back</span>
+          </a>
+          <h1 class="font-headline-sm text-[22px] font-bold text-on-surface m-0">Pengaturan & Privasi</h1>
+        </div>
+        <p class="font-body-md text-body-md text-secondary ml-8">
+          Kelola profil, keamanan, privasi data, dan preferensi interaksi akun Anda.
+        </p>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <div class="relative bg-surface-container-lowest rounded-xl p-1.5 mb-6 shadow-sm border border-outline-variant/30">
+        <nav class="flex items-center justify-between text-center overflow-x-auto" id="settings-nav-tabs">
+          <button class="settings-tab-btn flex-1 py-2 px-3 rounded-lg font-label-md text-label-md transition-all bg-secondary-container text-on-secondary-container font-semibold border-0 cursor-pointer whitespace-nowrap" data-tab="tab-account">
+            Akun
+          </button>
+          <button class="settings-tab-btn flex-1 py-2 px-3 rounded-lg font-label-md text-label-md transition-all text-secondary hover:text-on-surface hover:bg-surface-container-low border-0 cursor-pointer whitespace-nowrap" data-tab="tab-privacy">
+            Privasi & Permintaan
+          </button>
+          <button class="settings-tab-btn flex-1 py-2 px-3 rounded-lg font-label-md text-label-md transition-all text-secondary hover:text-on-surface hover:bg-surface-container-low border-0 cursor-pointer whitespace-nowrap" data-tab="tab-security">
+            Keamanan
+          </button>
+          <button class="settings-tab-btn flex-1 py-2 px-3 rounded-lg font-label-md text-label-md transition-all text-secondary hover:text-on-surface hover:bg-surface-container-low border-0 cursor-pointer whitespace-nowrap" data-tab="tab-management">
+            Manajemen Akun
+          </button>
+        </nav>
+      </div>
+
+      <!-- Global Alert Feedback Container -->
+      <div id="settings-alert" class="hidden mb-4 p-4 rounded-xl font-label-md text-label-md flex items-center justify-between shadow-sm">
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-[20px]" id="alert-icon">info</span>
+          <span id="alert-message">Notifikasi</span>
+        </div>
+        <button type="button" onclick="$('#settings-alert').addClass('hidden')" class="border-0 bg-transparent cursor-pointer p-1 text-inherit">
+          <span class="material-symbols-outlined text-[18px]">close</span>
+        </button>
+      </div>
+
+      <!-- ============================================== -->
+      <!-- TAB 1: AKUN (ACCOUNT)                          -->
+      <!-- ============================================== -->
+      <section id="tab-account" class="settings-tab-pane flex flex-col gap-6">
+        
+        <!-- Account Info Summary -->
+        <div class="bg-surface-container-lowest rounded-2xl p-6 shadow-sm border border-outline-variant/30">
+          <h2 class="font-headline-sm text-[18px] font-bold text-on-surface mb-3 flex items-center gap-2">
+            <span class="material-symbols-outlined text-[20px] text-primary">badge</span>
+            Informasi Akun
+          </h2>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-body-sm text-secondary">
+            <div>
+              <span class="block text-on-surface-variant font-semibold">Username</span>
+              <span class="text-on-surface font-mono" id="info-username">@{{ user_info.username | e }}</span>
+            </div>
+            <div>
+              <span class="block text-on-surface-variant font-semibold">Tanggal Registrasi</span>
+              <span class="text-on-surface" id="info-created-at">{{ user_info.created_at or 'Tidak tersedia' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ubah Username -->
+        <div class="bg-surface-container-lowest rounded-2xl p-6 shadow-sm border border-outline-variant/30">
+          <h2 class="font-headline-sm text-[18px] font-bold text-on-surface mb-1 flex items-center gap-2">
+            <span class="material-symbols-outlined text-[20px] text-primary">alternate_email</span>
+            Ubah Username
+          </h2>
+          <p class="font-body-sm text-secondary mb-4">
+            Username baru harus berupa 3-20 karakter alfanumerik atau underscore. Mengubah username akan memperbarui semua postingan dan relasi Anda.
+          </p>
+          <form id="form-change-username" class="flex flex-col sm:flex-row gap-3">
+            <div class="flex-1">
+              <input type="text" id="input-new-username" placeholder="Username baru..."
+                     class="w-full bg-surface-container-low rounded-xl px-4 py-2.5 font-body-md text-body-md text-on-surface border border-outline-variant focus:outline-none focus:ring-1 focus:ring-primary-container"
+                     required minlength="3" maxlength="20" pattern="^[a-zA-Z0-9_]+$"/>
+            </div>
+            <button type="submit" id="btn-change-username"
+                    class="px-6 py-2.5 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-all shadow-sm border-0 cursor-pointer shrink-0">
+              Ubah Username
+            </button>
+          </form>
+        </div>
+
+        <!-- Edit Profil & Email -->
+        <div class="bg-surface-container-lowest rounded-2xl p-6 shadow-sm border border-outline-variant/30">
+          <h2 class="font-headline-sm text-[18px] font-bold text-on-surface mb-1 flex items-center gap-2">
+            <span class="material-symbols-outlined text-[20px] text-primary">person</span>
+            Profil & Kontak
+          </h2>
+          <p class="font-body-sm text-secondary mb-4">
+            Kelola nama tampilan, biodata, email akun, dan foto profil Anda.
+          </p>
+          <form id="form-update-profile" class="flex flex-col gap-4">
+            <div>
+              <label class="font-label-md text-label-md text-on-surface-variant block mb-1" for="input-profile-name">Nama Tampilan</label>
+              <input type="text" id="input-profile-name" value="{{ user_info.profile_name | e }}"
+                     class="w-full bg-surface-container-low rounded-xl px-4 py-2.5 font-body-md text-body-md text-on-surface border border-outline-variant focus:outline-none focus:ring-1 focus:ring-primary-container"
+                     maxlength="50" required/>
+            </div>
+            <div>
+              <label class="font-label-md text-label-md text-on-surface-variant block mb-1" for="input-email">Alamat Email</label>
+              <input type="email" id="input-email" value="{{ user_info.email | e if user_info.email else '' }}"
+                     placeholder="contoh@domain.com"
+                     class="w-full bg-surface-container-low rounded-xl px-4 py-2.5 font-body-md text-body-md text-on-surface border border-outline-variant focus:outline-none focus:ring-1 focus:ring-primary-container"/>
+            </div>
+            <div>
+              <label class="font-label-md text-label-md text-on-surface-variant block mb-1" for="input-profile-info">Biodata (Bio)</label>
+              <textarea id="input-profile-info" rows="3" maxlength="250"
+                        class="w-full bg-surface-container-low rounded-xl px-4 py-2.5 font-body-md text-body-md text-on-surface border border-outline-variant focus:outline-none focus:ring-1 focus:ring-primary-container resize-none">{{ user_info.profile_info | e if user_info.profile_info else '' }}</textarea>
+            </div>
+            <div>
+              <label class="font-label-md text-label-md text-on-surface-variant block mb-1" for="input-profile-pic">Foto Profil Baru (Opsional)</label>
+              <input type="file" id="input-profile-pic" accept="image/png,image/jpeg,image/webp"
+                     class="font-body-sm text-body-sm text-on-surface-variant"/>
+            </div>
+            <div class="flex justify-end pt-2">
+              <button type="submit" id="btn-save-profile"
+                      class="px-6 py-2.5 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-all shadow-sm border-0 cursor-pointer">
+                Simpan Perubahan
+              </button>
+            </div>
+          </form>
+        </div>
+
+      </section>
+
+      <!-- ============================================== -->
+      <!-- TAB 2: PRIVASI & REQUESTS (PRIVACY)           -->
+      <!-- ============================================== -->
+      <section id="tab-privacy" class="settings-tab-pane hidden flex flex-col gap-6">
+        
+        <!-- Privacy Settings Form -->
+        <div class="bg-surface-container-lowest rounded-2xl p-6 shadow-sm border border-outline-variant/30">
+          <h2 class="font-headline-sm text-[18px] font-bold text-on-surface mb-1 flex items-center gap-2">
+            <span class="material-symbols-outlined text-[20px] text-primary">lock</span>
+            Pengaturan Privasi
+          </h2>
+          <p class="font-body-sm text-secondary mb-6">
+            Tentukan siapa yang dapat melihat akun dan postingan Anda di Sweeter.
+          </p>
+
+          <form id="form-privacy-settings" class="flex flex-col gap-6">
+            
+            <!-- Private Account Switch -->
+            <div class="flex items-start justify-between gap-4 p-4 rounded-xl bg-surface-container-low border border-outline-variant/40">
+              <div class="flex-1">
+                <span class="font-label-md font-bold text-on-surface block mb-1">Akun Privat (Private Account)</span>
+                <p class="font-body-sm text-secondary m-0 leading-relaxed">
+                  Bila diaktifkan, hanya orang yang Anda setujui yang dapat mengikuti Anda dan melihat postingan Anda. Pengguna yang belum disetujui tidak dapat mengakses konten Anda.
+                </p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                <input type="checkbox" id="check-is-private" class="sr-only peer" {% if user_info.is_private %}checked{% endif %}>
+                <div class="w-11 h-6 bg-surface-container-highest peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container"></div>
+              </label>
+            </div>
+
+            <!-- Default Post Privacy -->
+            <div>
+              <label class="font-label-md text-label-md text-on-surface-variant block mb-1.5" for="select-default-post-privacy">
+                Visibilitas Postingan Standar
+              </label>
+              <select id="select-default-post-privacy"
+                      class="w-full bg-surface-container-low rounded-xl px-4 py-2.5 font-body-md text-body-md text-on-surface border border-outline-variant focus:outline-none focus:ring-1 focus:ring-primary-container">
+                <option value="public" {% if user_info.default_post_privacy == 'public' %}selected{% endif %}>Publik (Dapat dilihat semua pengguna)</option>
+                <option value="followers" {% if user_info.default_post_privacy == 'followers' %}selected{% endif %}>Hanya Pengikut (Followers Only)</option>
+                <option value="private" {% if user_info.default_post_privacy == 'private' %}selected{% endif %}>Privat (Hanya Saya)</option>
+              </select>
+            </div>
+
+            <!-- Follow Counts & Bio Controls -->
+            <div class="flex flex-col gap-3 pt-2">
+              <label class="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" id="check-show-follow-counts" class="w-4 h-4 accent-primary-container rounded" {% if user_info.show_follow_counts is not defined or user_info.show_follow_counts %}checked{% endif %}>
+                <span class="font-body-md text-body-md text-on-surface">Tampilkan jumlah Pengikut dan Mengikuti di profil</span>
+              </label>
+              <label class="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" id="check-show-bio" class="w-4 h-4 accent-primary-container rounded" {% if user_info.show_bio is not defined or user_info.show_bio %}checked{% endif %}>
+                <span class="font-body-md text-body-md text-on-surface">Tampilkan teks Biodata (Bio) di profil</span>
+              </label>
+            </div>
+
+            <div class="flex justify-end pt-2">
+              <button type="submit" id="btn-save-privacy"
+                      class="px-6 py-2.5 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-all shadow-sm border-0 cursor-pointer">
+                Simpan Preferensi Privasi
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Permintaan Mengikuti (Follow Requests) Card -->
+        <div class="bg-surface-container-lowest rounded-2xl p-6 shadow-sm border border-outline-variant/30">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="font-headline-sm text-[18px] font-bold text-on-surface m-0 flex items-center gap-2">
+              <span class="material-symbols-outlined text-[20px] text-primary">person_add</span>
+              Permintaan Mengikuti
+            </h2>
+            <span id="follow-requests-count-badge" class="hidden px-2.5 py-0.5 rounded-full bg-primary-container text-on-primary text-[12px] font-bold">
+              0
+            </span>
+          </div>
+          <p class="font-body-sm text-secondary mb-4">
+            Kelola permintaan masuk dari pengguna yang ingin mengikuti akun Anda.
+          </p>
+
+          <div id="follow-requests-list" class="flex flex-col gap-2 divide-y divide-outline-variant/20">
+            <div class="p-6 text-center text-on-surface-variant" id="requests-loading">
+              <i class="fa fa-spinner fa-spin text-xl text-primary mb-2"></i>
+              <p class="font-body-sm text-body-sm">Memeriksa permintaan masuk...</p>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ============================================== -->
+      <!-- TAB 3: KEAMANAN (SECURITY)                     -->
+      <!-- ============================================== -->
+      <section id="tab-security" class="settings-tab-pane hidden flex flex-col gap-6">
+        
+        <!-- Change Password -->
+        <div class="bg-surface-container-lowest rounded-2xl p-6 shadow-sm border border-outline-variant/30">
+          <h2 class="font-headline-sm text-[18px] font-bold text-on-surface mb-1 flex items-center gap-2">
+            <span class="material-symbols-outlined text-[20px] text-primary">key</span>
+            Ubah Kata Sandi
+          </h2>
+          <p class="font-body-sm text-secondary mb-4">
+            Kata sandi baru minimal harus 6 karakter. Pastikan kata sandi Anda kuat dan unik.
+          </p>
+          <form id="form-change-password" class="flex flex-col gap-4">
+            <div>
+              <label class="font-label-md text-label-md text-on-surface-variant block mb-1" for="input-old-password">Kata Sandi Lama</label>
+              <input type="password" id="input-old-password" required
+                     class="w-full bg-surface-container-low rounded-xl px-4 py-2.5 font-body-md text-body-md text-on-surface border border-outline-variant focus:outline-none focus:ring-1 focus:ring-primary-container"/>
+            </div>
+            <div>
+              <label class="font-label-md text-label-md text-on-surface-variant block mb-1" for="input-new-password">Kata Sandi Baru</label>
+              <input type="password" id="input-new-password" minlength="6" required
+                     class="w-full bg-surface-container-low rounded-xl px-4 py-2.5 font-body-md text-body-md text-on-surface border border-outline-variant focus:outline-none focus:ring-1 focus:ring-primary-container"/>
+            </div>
+            <div>
+              <label class="font-label-md text-label-md text-on-surface-variant block mb-1" for="input-confirm-password">Konfirmasi Kata Sandi Baru</label>
+              <input type="password" id="input-confirm-password" minlength="6" required
+                     class="w-full bg-surface-container-low rounded-xl px-4 py-2.5 font-body-md text-body-md text-on-surface border border-outline-variant focus:outline-none focus:ring-1 focus:ring-primary-container"/>
+            </div>
+            <div class="flex justify-end pt-2">
+              <button type="submit" id="btn-save-password"
+                      class="px-6 py-2.5 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-all shadow-sm border-0 cursor-pointer">
+                Perbarui Kata Sandi
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Sesi & Logout Multi-device -->
+        <div class="bg-surface-container-lowest rounded-2xl p-6 shadow-sm border border-outline-variant/30">
+          <h2 class="font-headline-sm text-[18px] font-bold text-on-surface mb-1 flex items-center gap-2">
+            <span class="material-symbols-outlined text-[20px] text-primary">devices</span>
+            Manajemen Sesi
+          </h2>
+          <p class="font-body-sm text-secondary mb-4 leading-relaxed">
+            Keluar dari seluruh perangkat dan sesi aktif lainnya. Token autentikasi sebelumnya akan dibatalkan di server dan Anda akan diminta login kembali.
+          </p>
+          <button type="button" onclick="logout_all_sessions()" id="btn-logout-all"
+                  class="px-5 py-2.5 rounded-full bg-surface-container-high text-on-surface hover:bg-surface-container-highest font-label-md text-label-md transition-all shadow-sm border border-outline-variant/40 cursor-pointer flex items-center gap-2">
+            <span class="material-symbols-outlined text-[18px]">logout</span>
+            <span>Keluar Dari Semua Sesi</span>
+          </button>
+        </div>
+
+      </section>
+
+      <!-- ============================================== -->
+      <!-- TAB 4: MANAJEMEN AKUN (ACCOUNT MANAGEMENT)     -->
+      <!-- ============================================== -->
+      <section id="tab-management" class="settings-tab-pane hidden flex flex-col gap-6">
+        
+        <!-- Deactivate Account -->
+        <div class="bg-surface-container-lowest rounded-2xl p-6 shadow-sm border border-outline-variant/30">
+          <h2 class="font-headline-sm text-[18px] font-bold text-on-surface mb-1 flex items-center gap-2">
+            <span class="material-symbols-outlined text-[20px] text-secondary">power_settings_new</span>
+            Nonaktifkan Akun Sementara
+          </h2>
+          <p class="font-body-sm text-secondary mb-4 leading-relaxed">
+            Menonaktifkan akun akan menyembunyikan profil dan postingan Anda dari seluruh pengguna lain. Anda dapat mengaktifkan kembali akun Anda kapan saja hanya dengan login kembali ke Sweeter.
+          </p>
+          <button type="button" onclick="open_deactivate_modal()"
+                  class="px-5 py-2.5 rounded-full bg-surface-container-high text-on-surface hover:bg-surface-container-highest font-label-md text-label-md transition-all shadow-sm border border-outline-variant/40 cursor-pointer">
+            Nonaktifkan Akun
+          </button>
+        </div>
+
+        <!-- Delete Account Permanently -->
+        <div class="bg-surface-container-lowest rounded-2xl p-6 shadow-sm border border-error-container">
+          <h2 class="font-headline-sm text-[18px] font-bold text-error mb-1 flex items-center gap-2">
+            <span class="material-symbols-outlined text-[20px] text-error">delete_forever</span>
+            Hapus Akun Secara Permanen
+          </h2>
+          <p class="font-body-sm text-secondary mb-4 leading-relaxed">
+            Tindakan ini permanen dan tidak dapat dibatalkan. Semua postingan, komentar, reaksi, relasi follow, bookmark, dan notifikasi yang terkait dengan akun Anda akan dihapus secara menyeluruh dari server.
+          </p>
+          <button type="button" onclick="open_delete_modal()"
+                  class="px-5 py-2.5 rounded-full bg-error text-on-error hover:opacity-90 font-label-md text-label-md transition-all shadow-sm border-0 cursor-pointer flex items-center gap-2">
+            <span class="material-symbols-outlined text-[18px]">delete</span>
+            <span>Hapus Akun Permanen</span>
+          </button>
+        </div>
+
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- ============================================== -->
+<!-- MODAL: KONFIRMASI NONAKTIFKAN AKUN             -->
+<!-- ============================================== -->
+<div id="deactivate-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+  <div class="bg-surface-container-lowest rounded-2xl w-full max-w-sm shadow-xl border border-outline-variant/30 p-6">
+    <h3 class="font-headline-sm text-headline-sm font-bold text-on-surface mb-2">Nonaktifkan Akun?</h3>
+    <p class="font-body-sm text-body-sm text-secondary mb-4 leading-relaxed">
+      Profil dan postingan Anda tidak akan dapat dilihat oleh pengguna lain. Masukkan kata sandi Anda untuk mengonfirmasi penonaktifan.
+    </p>
+    <div class="mb-4">
+      <label class="font-label-md text-label-md text-on-surface-variant block mb-1" for="deactivate-password">Kata Sandi</label>
+      <input type="password" id="deactivate-password" placeholder="Masukkan kata sandi..."
+             class="w-full bg-surface-container-low rounded-xl px-4 py-2 font-body-md text-body-md text-on-surface border border-outline-variant focus:outline-none focus:ring-1 focus:ring-primary-container"/>
+    </div>
+    <div class="flex items-center justify-end gap-3">
+      <button type="button" onclick="close_deactivate_modal()" class="px-4 py-2 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container transition-colors border-0 bg-transparent cursor-pointer">
+        Batal
+      </button>
+      <button type="button" onclick="submit_deactivate_account()" id="btn-confirm-deactivate"
+              class="px-5 py-2 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-colors border-0 cursor-pointer shadow-sm">
+        Konfirmasi Nonaktifkan
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================== -->
+<!-- MODAL: KONFIRMASI HAPUS AKUN PERMANEN          -->
+<!-- ============================================== -->
+<div id="delete-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+  <div class="bg-surface-container-lowest rounded-2xl w-full max-w-md shadow-xl border border-error-container p-6">
+    <div class="w-12 h-12 rounded-full bg-error-container flex items-center justify-center mb-3 text-error">
+      <span class="material-symbols-outlined text-[28px]">warning</span>
+    </div>
+    <h3 class="font-headline-sm text-headline-sm font-bold text-on-surface mb-2">Hapus Akun Permanen?</h3>
+    <p class="font-body-sm text-body-sm text-secondary mb-4 leading-relaxed">
+      Perhatian: Seluruh data Anda akan dihapus secara permanen dan tidak dapat dipulihkan kembali. Masukkan kata sandi Anda untuk melanjutkan penghapusan akun.
+    </p>
+    <div class="mb-4">
+      <label class="font-label-md text-label-md text-on-surface-variant block mb-1" for="delete-password">Kata Sandi</label>
+      <input type="password" id="delete-password" placeholder="Masukkan kata sandi..."
+             class="w-full bg-surface-container-low rounded-xl px-4 py-2 font-body-md text-body-md text-on-surface border border-outline-variant focus:outline-none focus:ring-1 focus:ring-error"/>
+    </div>
+    <div class="flex items-center justify-end gap-3">
+      <button type="button" onclick="close_delete_modal()" class="px-4 py-2 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container transition-colors border-0 bg-transparent cursor-pointer">
+        Batal
+      </button>
+      <button type="button" onclick="submit_delete_account()" id="btn-confirm-delete"
+              class="px-5 py-2 rounded-full bg-error text-on-error hover:opacity-90 font-label-md text-label-md transition-colors border-0 cursor-pointer shadow-sm">
+        Hapus Akun Selamanya
+      </button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/myjs.js"></script>
+<script>
+  function show_alert(message, isError) {
+    let $alert = $('#settings-alert');
+    let $icon = $('#alert-icon');
+    let $msg = $('#alert-message');
+
+    $alert.removeClass('hidden bg-error-container text-on-error-container bg-surface-container-high text-on-surface');
+    if (isError) {
+      $alert.addClass('bg-error-container text-on-error-container');
+      $icon.text('error');
+    } else {
+      $alert.addClass('bg-surface-container-high text-on-surface');
+      $icon.text('check_circle');
+    }
+    $msg.text(message);
+    $('html, body').animate({ scrollTop: 0 }, 200);
+  }
+
+  // Tab switching
+  $('.settings-tab-btn').on('click', function () {
+    let tabId = $(this).attr('data-tab');
+    $('.settings-tab-btn').removeClass('bg-secondary-container text-on-secondary-container font-semibold')
+      .addClass('text-secondary hover:text-on-surface hover:bg-surface-container-low');
+    $(this).removeClass('text-secondary hover:text-on-surface hover:bg-surface-container-low')
+      .addClass('bg-secondary-container text-on-secondary-container font-semibold');
+
+    $('.settings-tab-pane').addClass('hidden');
+    $('#' + tabId).removeClass('hidden');
+
+    if (tabId === 'tab-privacy') {
+      load_follow_requests();
+    }
+  });
+
+  // Change Username Form
+  $('#form-change-username').on('submit', function (e) {
+    e.preventDefault();
+    let newUsername = $('#input-new-username').val().trim();
+    if (!newUsername) return;
+
+    if (!confirm(`Apakah Anda yakin ingin mengubah username menjadi @${newUsername}? URL profil Anda juga akan berubah.`)) {
+      return;
+    }
+
+    let $btn = $('#btn-change-username');
+    $btn.prop('disabled', true).text('Menyimpan...');
+
+    $.ajax({
+      type: 'POST',
+      url: '/api/account/change_username',
+      contentType: 'application/json',
+      data: JSON.stringify({ new_username: newUsername }),
+      success: function (res) {
+        $btn.prop('disabled', false).text('Ubah Username');
+        if (res.result === 'success') {
+          show_alert(res.msg || 'Username berhasil diperbarui.', false);
+          $('#info-username').text('@' + newUsername);
+          $('#input-new-username').val('');
+          setTimeout(function () {
+            window.location.reload();
+          }, 1000);
+        } else {
+          show_alert(res.msg || 'Gagal mengubah username.', true);
+        }
+      },
+      error: function (xhr) {
+        $btn.prop('disabled', false).text('Ubah Username');
+        let msg = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : 'Gagal mengubah username.';
+        show_alert(msg, true);
+      }
+    });
+  });
+
+  // Update Profile Form
+  $('#form-update-profile').on('submit', function (e) {
+    e.preventDefault();
+    let formData = new FormData();
+    formData.append('profile_name', $('#input-profile-name').val().trim());
+    formData.append('profile_info', $('#input-profile-info').val().trim());
+    formData.append('email', $('#input-email').val().trim());
+
+    let fileInput = document.getElementById('input-profile-pic');
+    if (fileInput.files.length > 0) {
+      formData.append('profile_pic', fileInput.files[0]);
+    }
+
+    let $btn = $('#btn-save-profile');
+    $btn.prop('disabled', true).text('Menyimpan...');
+
+    $.ajax({
+      type: 'POST',
+      url: '/api/account/profile',
+      data: formData,
+      processData: false,
+      contentType: false,
+      success: function (res) {
+        $btn.prop('disabled', false).text('Simpan Perubahan');
+        if (res.result === 'success') {
+          show_alert(res.msg || 'Profil berhasil diperbarui.', false);
+        } else {
+          show_alert(res.msg || 'Gagal memperbarui profil.', true);
+        }
+      },
+      error: function (xhr) {
+        $btn.prop('disabled', false).text('Simpan Perubahan');
+        let msg = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : 'Gagal memperbarui profil.';
+        show_alert(msg, true);
+      }
+    });
+  });
+
+  // Privacy Settings Form
+  $('#form-privacy-settings').on('submit', function (e) {
+    e.preventDefault();
+    let isPrivate = $('#check-is-private').is(':checked');
+    let defaultPrivacy = $('#select-default-post-privacy').val();
+    let showFollowCounts = $('#check-show-follow-counts').is(':checked');
+    let showBio = $('#check-show-bio').is(':checked');
+
+    let $btn = $('#btn-save-privacy');
+    $btn.prop('disabled', true).text('Menyimpan...');
+
+    $.ajax({
+      type: 'POST',
+      url: '/api/account/privacy',
+      contentType: 'application/json',
+      data: JSON.stringify({
+        is_private: isPrivate,
+        default_post_privacy: defaultPrivacy,
+        show_follow_counts: showFollowCounts,
+        show_bio: showBio
+      }),
+      success: function (res) {
+        $btn.prop('disabled', false).text('Simpan Preferensi Privasi');
+        if (res.result === 'success') {
+          show_alert(res.msg || 'Pengaturan privasi berhasil diperbarui.', false);
+        } else {
+          show_alert(res.msg || 'Gagal memperbarui privasi.', true);
+        }
+      },
+      error: function (xhr) {
+        $btn.prop('disabled', false).text('Simpan Preferensi Privasi');
+        let msg = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : 'Gagal memperbarui privasi.';
+        show_alert(msg, true);
+      }
+    });
+  });
+
+  // Change Password Form
+  $('#form-change-password').on('submit', function (e) {
+    e.preventDefault();
+    let oldPassword = $('#input-old-password').val();
+    let newPassword = $('#input-new-password').val();
+    let confirmPassword = $('#input-confirm-password').val();
+
+    if (newPassword !== confirmPassword) {
+      show_alert('Konfirmasi kata sandi baru tidak cocok.', true);
+      return;
+    }
+
+    let $btn = $('#btn-save-password');
+    $btn.prop('disabled', true).text('Menyimpan...');
+
+    $.ajax({
+      type: 'POST',
+      url: '/api/account/change_password',
+      contentType: 'application/json',
+      data: JSON.stringify({
+        old_password: oldPassword,
+        new_password: newPassword,
+        confirm_password: confirmPassword
+      }),
+      success: function (res) {
+        $btn.prop('disabled', false).text('Perbarui Kata Sandi');
+        if (res.result === 'success') {
+          show_alert(res.msg || 'Kata sandi berhasil diperbarui.', false);
+          $('#input-old-password').val('');
+          $('#input-new-password').val('');
+          $('#input-confirm-password').val('');
+        } else {
+          show_alert(res.msg || 'Gagal memperbarui kata sandi.', true);
+        }
+      },
+      error: function (xhr) {
+        $btn.prop('disabled', false).text('Perbarui Kata Sandi');
+        let msg = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : 'Gagal memperbarui kata sandi.';
+        show_alert(msg, true);
+      }
+    });
+  });
+
+  // Logout All Sessions
+  function logout_all_sessions() {
+    if (!confirm('Apakah Anda yakin ingin keluar dari semua perangkat? Anda akan dialihkan ke halaman utama.')) {
+      return;
+    }
+    $.ajax({
+      type: 'POST',
+      url: '/api/account/logout_all_sessions',
+      success: function (res) {
+        alert(res.msg || 'Berhasil keluar dari semua sesi.');
+        window.location.href = '/';
+      },
+      error: function (xhr) {
+        let msg = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : 'Gagal keluar dari semua sesi.';
+        show_alert(msg, true);
+      }
+    });
+  }
+
+  // Deactivate Modal & Action
+  function open_deactivate_modal() {
+    $('#deactivate-password').val('');
+    $('#deactivate-modal').removeClass('hidden');
+  }
+  function close_deactivate_modal() {
+    $('#deactivate-modal').addClass('hidden');
+  }
+  function submit_deactivate_account() {
+    let pw = $('#deactivate-password').val();
+    if (!pw) {
+      alert('Masukkan kata sandi untuk mengonfirmasi.');
+      return;
+    }
+    let $btn = $('#btn-confirm-deactivate');
+    $btn.prop('disabled', true).text('Memproses...');
+
+    $.ajax({
+      type: 'POST',
+      url: '/api/account/deactivate',
+      contentType: 'application/json',
+      data: JSON.stringify({ password: pw }),
+      success: function (res) {
+        alert(res.msg || 'Akun Anda berhasil dinonaktifkan.');
+        window.location.href = '/';
+      },
+      error: function (xhr) {
+        $btn.prop('disabled', false).text('Konfirmasi Nonaktifkan');
+        let msg = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : 'Gagal menonaktifkan akun.';
+        alert(msg);
+      }
+    });
+  }
+
+  // Delete Modal & Action
+  function open_delete_modal() {
+    $('#delete-password').val('');
+    $('#delete-modal').removeClass('hidden');
+  }
+  function close_delete_modal() {
+    $('#delete-modal').addClass('hidden');
+  }
+  function submit_delete_account() {
+    let pw = $('#delete-password').val();
+    if (!pw) {
+      alert('Masukkan kata sandi untuk mengonfirmasi penghapusan.');
+      return;
+    }
+    let $btn = $('#btn-confirm-delete');
+    $btn.prop('disabled', true).text('Menghapus Akun...');
+
+    $.ajax({
+      type: 'POST',
+      url: '/api/account/delete',
+      contentType: 'application/json',
+      data: JSON.stringify({ password: pw }),
+      success: function (res) {
+        alert(res.msg || 'Akun Anda telah dihapus secara permanen.');
+        window.location.href = '/';
+      },
+      error: function (xhr) {
+        $btn.prop('disabled', false).text('Hapus Akun Selamanya');
+        let msg = (xhr.responseJSON && xhr.responseJSON.msg) ? xhr.responseJSON.msg : 'Gagal menghapus akun.';
+        alert(msg);
+      }
+    });
+  }
+
+  // Load Follow Requests
+  function load_follow_requests() {
+    $.ajax({
+      type: 'GET',
+      url: '/api/follow_requests',
+      success: function (res) {
+        let $list = $('#follow-requests-list');
+        $list.empty();
+        let requests = res.follow_requests || [];
+
+        if (requests.length === 0) {
+          $('#follow-requests-count-badge').addClass('hidden');
+          $list.html(`
+            <div class="p-8 text-center text-on-surface-variant">
+              <span class="material-symbols-outlined text-[36px] text-outline-variant mb-1">mark_email_read</span>
+              <p class="font-body-sm text-secondary">Tidak ada permintaan mengikuti pending saat ini.</p>
+            </div>
+          `);
+          return;
+        }
+
+        $('#follow-requests-count-badge').text(requests.length).removeClass('hidden');
+
+        requests.forEach(function (req) {
+          let avatar = req.profile_pic_real ? '/static/' + req.profile_pic_real : '/static/profile_pics/profile_placeholder.png';
+          let displayName = req.profile_name || req.requester;
+          let bio = req.profile_info || '';
+
+          let html = `
+            <div class="py-3 px-2 flex items-center justify-between gap-3 follow-req-card" id="follow-req-${escapeHtml(req.requester)}">
+              <div class="flex items-center gap-3 min-w-0">
+                <a href="/user/${encodeURIComponent(req.requester)}">
+                  <img src="${avatar}" class="w-10 h-10 rounded-full object-cover shrink-0" onerror="this.src='/static/profile_pics/profile_placeholder.png'"/>
+                </a>
+                <div class="flex flex-col min-w-0">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <a href="/user/${encodeURIComponent(req.requester)}" class="font-label-md font-bold text-on-surface no-underline hover:underline truncate">${escapeHtml(displayName)}</a>
+                    <span class="font-caption text-secondary truncate">@${escapeHtml(req.requester)}</span>
+                  </div>
+                  <span class="font-body-sm text-secondary truncate">${escapeHtml(bio)}</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <button type="button" onclick="accept_follow_request_ui('${escapeHtml(req.requester)}')"
+                        class="accept-btn px-4 py-1.5 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-all shadow-sm border-0 cursor-pointer">
+                  Setujui
+                </button>
+                <button type="button" onclick="reject_follow_request_ui('${escapeHtml(req.requester)}')"
+                        class="reject-btn px-4 py-1.5 rounded-full bg-surface-container-high text-on-surface hover:bg-surface-container-highest font-label-md text-label-md transition-all shadow-sm border border-outline-variant/40 cursor-pointer">
+                  Tolak
+                </button>
+              </div>
+            </div>
+          `;
+          $list.append(html);
+        });
+      },
+      error: function (xhr) {
+        $('#follow-requests-list').html(`
+          <div class="p-6 text-center text-error">
+            <p class="font-body-sm">Gagal memuat permintaan mengikuti.</p>
+          </div>
+        `);
+      }
+    });
+  }
+
+  // Load requests on initial page load if privacy tab is active or as prefetch
+  $(document).ready(function () {
+    load_follow_requests();
+  });
+</script>
+
+</body>
+</html>

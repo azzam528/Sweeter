@@ -124,6 +124,18 @@ def init_indexes():
         # 34. Indexes untuk db.moderation_logs (Audit Trail)
         db.moderation_logs.create_index([("created_at", -1)])
         db.moderation_logs.create_index([("admin_id", 1), ("created_at", -1)])
+        # 35. Unique index pada username di db.users
+        db.users.create_index([("username", 1)], unique=True)
+        # 36. Sparse unique index pada email di db.users
+        db.users.create_index([("email", 1)], unique=True, sparse=True)
+        db.users.create_index([("is_deactivated", 1)])
+        db.users.create_index([("is_private", 1)])
+        # 37. Indexes untuk db.follow_requests
+        db.follow_requests.create_index([("requester", 1), ("target", 1)], unique=True)
+        db.follow_requests.create_index([("target", 1), ("status", 1), ("created_at", -1)])
+        db.follow_requests.create_index([("requester", 1), ("status", 1)])
+        # 38. Index untuk privasi post di db.posts
+        db.posts.create_index([("privacy", 1)])
     except Exception as e:
         print(f"Warning saat inisialisasi index MongoDB: {e}")
 
@@ -438,4 +450,66 @@ def get_muted_usernames(username: str) -> list:
     if not username:
         return []
     return db.mutes.distinct("muted", {"muter": username})
+
+
+def is_private_account(username: str) -> bool:
+    """Memeriksa apakah akun pengguna diatur sebagai akun privat."""
+    if not username:
+        return False
+    user = db.users.find_one({"username": username}, {"is_private": 1})
+    return bool(user and user.get("is_private") is True)
+
+
+def is_account_deactivated(username: str) -> bool:
+    """Memeriksa apakah akun pengguna sedang dinonaktifkan (deactivated)."""
+    if not username:
+        return False
+    user = db.users.find_one({"username": username}, {"is_deactivated": 1})
+    return bool(user and user.get("is_deactivated") is True)
+
+
+def has_pending_follow_request(requester: str, target: str) -> bool:
+    """Memeriksa apakah ada permintaan follow yang masih berstatus pending."""
+    if not requester or not target:
+        return False
+    return bool(db.follow_requests.find_one({
+        "requester": requester,
+        "target": target,
+        "status": "pending"
+    }))
+
+
+def get_pending_follow_requests_count(target: str) -> int:
+    """Menghitung jumlah permintaan follow pending untuk target pengguna."""
+    if not target:
+        return 0
+    return db.follow_requests.count_documents({
+        "target": target,
+        "status": "pending"
+    })
+
+
+def can_view_user_content(viewer: str, target_author: str) -> bool:
+    """
+    Menentukan apakah viewer berhak melihat konten target_author:
+    1. Viewer adalah pemilik akun itu sendiri -> True
+    2. Terdapat relasi blokir -> False
+    3. Target author berstatus dinonaktifkan (deactivated) -> False
+    4. Target author akun privat -> Hanya jika viewer adalah follower yang disetujui
+    5. Target author akun publik -> True
+    """
+    if not target_author:
+        return False
+    if viewer and viewer == target_author:
+        return True
+    if viewer and has_block_relation(viewer, target_author):
+        return False
+    if is_account_deactivated(target_author):
+        return False
+    if is_private_account(target_author):
+        if not viewer:
+            return False
+        return is_following(viewer, target_author)
+    return True
+
 

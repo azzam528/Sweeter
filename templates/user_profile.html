@@ -223,6 +223,11 @@
             <span class="material-symbols-outlined text-[22px]">volume_off</span>
             <span class="font-label-md text-label-md">Muted</span>
           </a>
+          <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all no-underline"
+            href="/settings">
+            <span class="material-symbols-outlined text-[22px]">settings</span>
+            <span class="font-label-md text-label-md">Settings</span>
+          </a>
           {% if is_admin %}
           <a class="flex items-center gap-space-md px-space-md py-space-sm rounded-full text-on-surface-variant hover:bg-error-container hover:text-error transition-all no-underline font-semibold"
             href="/admin/reports">
@@ -309,6 +314,12 @@
                     <span class="group-hover:hidden">Following</span>
                     <span class="hidden group-hover:inline">Unfollow</span>
                   </button>
+                  {% elif has_requested %}
+                  <button id="cancel-request-btn" onclick="cancel_follow_request_ui('{{ user_info.username | e }}')"
+                    class="px-5 py-1.5 rounded-full bg-surface-container-high hover:bg-error-container hover:text-on-error-container text-on-surface font-label-md text-label-md transition-all duration-150 shadow-sm border border-outline-variant cursor-pointer group" title="Klik untuk membatalkan permintaan">
+                    <span class="group-hover:hidden flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">schedule</span> Requested</span>
+                    <span class="hidden group-hover:inline">Cancel Request</span>
+                  </button>
                   {% else %}
                   <button id="follow-btn" data-username="{{ user_info.username | e }}" data-following="false"
                     class="px-5 py-1.5 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md text-label-md transition-all duration-150 shadow-sm border-0 cursor-pointer">
@@ -393,10 +404,12 @@
               </div>
 
               <!-- Bio -->
+              {% if show_bio or status %}
               <p class="font-body-md text-body-md text-on-surface mt-3 leading-relaxed max-w-xl"
                 id="display-profile-info">
                 {{ user_info.profile_info | e if user_info.profile_info else 'No bio provided yet.' }}
               </p>
+              {% endif %}
 
               <!-- Stats (Real Data from MongoDB) -->
               <div
@@ -406,6 +419,7 @@
                   <span class="font-body-sm text-body-sm text-secondary">Posts</span>
                 </div>
                 <!-- Followers & Following stats linking to lists -->
+                {% if show_follow_counts or status %}
                 <a href="/user/{{ user_info.username | e }}/followers"
                   class="flex items-baseline gap-1.5 no-underline hover:underline cursor-pointer text-on-surface">
                   <span class="font-headline-sm text-headline-sm font-bold text-on-surface"
@@ -418,6 +432,11 @@
                     id="following-count-display">{{ following_count }}</span>
                   <span class="font-body-sm text-body-sm text-secondary">Following</span>
                 </a>
+                {% else %}
+                <div class="flex items-baseline gap-1.5 text-on-surface">
+                  <span class="font-body-sm text-body-sm text-secondary italic">Jumlah pengikut disembunyikan</span>
+                </div>
+                {% endif %}
               </div>
 
             </div>
@@ -492,6 +511,36 @@
               Anda diblokir oleh @{{ user_info.username | e }} dan tidak dapat melihat postingan atau berinteraksi
               dengan akun ini.
             </p>
+          </div>
+          {% elif is_private_locked %}
+          <!-- ===== PRIVATE ACCOUNT LOCKED NOTICE ===== -->
+          <div
+            class="bg-surface-container-lowest rounded-2xl p-10 text-center shadow-sm mt-4 border border-outline-variant/30">
+            <div
+              class="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center mx-auto mb-4 text-on-surface-variant">
+              <span class="material-symbols-outlined text-[32px]">lock</span>
+            </div>
+            <h2 class="font-headline-sm text-headline-sm font-bold text-on-surface mb-2">Akun Ini Bersifat Privat</h2>
+            <p class="font-body-md text-body-md text-secondary max-w-md mx-auto mb-6">
+              Hanya pengikut yang disetujui yang dapat melihat postingan dan aktivitas dari @{{ user_info.username | e }}.
+            </p>
+            {% if not status %}
+              {% if has_requested %}
+              <button onclick="cancel_follow_request_ui('{{ user_info.username | e }}')"
+                id="private-lock-action-btn"
+                class="px-6 py-2.5 rounded-full bg-surface-container-high text-on-surface hover:bg-surface-container-highest font-label-md transition-all shadow-sm border border-outline-variant/50 cursor-pointer flex items-center gap-2 mx-auto">
+                <span class="material-symbols-outlined text-[18px]">hourglass_top</span>
+                <span>Batalkan Permintaan</span>
+              </button>
+              {% else %}
+              <button onclick="follow_user('{{ user_info.username | e }}')"
+                id="private-lock-action-btn"
+                class="px-6 py-2.5 rounded-full bg-primary-container text-on-primary hover:bg-primary font-label-md transition-all shadow-sm border-0 cursor-pointer flex items-center gap-2 mx-auto">
+                <span class="material-symbols-outlined text-[18px]">person_add</span>
+                <span>Kirim Permintaan Mengikuti</span>
+              </button>
+              {% endif %}
+            {% endif %}
           </div>
           {% else %}
           <!-- ===== PROFILE NAVIGATION TABS ===== -->

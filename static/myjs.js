@@ -1372,6 +1372,11 @@ function toggle_follow(target_username, btnSelector, countSelector) {
 
   if (!$btn.length || !target_username) return;
 
+  if ($btn.attr('data-requested') === 'true') {
+    cancel_follow_request_ui(target_username, btnSelector);
+    return;
+  }
+
   let isFollowing = $btn.attr('data-following') === 'true';
   let endpoint = isFollowing ? '/api/unfollow' : '/api/follow';
 
@@ -1386,9 +1391,15 @@ function toggle_follow(target_username, btnSelector, countSelector) {
     success: function (res) {
       if (res.result === 'success') {
         let nowFollowing = Boolean(res.is_following);
+        let isRequested = Boolean(res.is_requested);
         $btn.attr('data-following', nowFollowing ? 'true' : 'false');
+        $btn.attr('data-requested', isRequested ? 'true' : 'false');
 
-        if (nowFollowing) {
+        if (isRequested) {
+          $btn.removeClass('bg-primary-container text-on-primary hover:bg-primary border-0')
+            .addClass('bg-surface-container-high text-on-surface border border-outline-variant group hover:bg-error-container hover:text-on-error-container')
+            .html('<span class="group-hover:hidden flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">schedule</span> Requested</span><span class="hidden group-hover:inline">Cancel Request</span>');
+        } else if (nowFollowing) {
           $btn.removeClass('bg-primary-container text-on-primary hover:bg-primary border-0')
             .addClass('bg-surface-container-high text-on-surface border border-outline-variant group hover:bg-error-container hover:text-on-error-container')
             .html('<span class="group-hover:hidden">Following</span><span class="hidden group-hover:inline">Unfollow</span>');
@@ -2924,17 +2935,17 @@ function update_autosave_status(state, detail) {
     $el.html('').removeClass('text-error text-primary text-amber-700');
   } else if (state === 'unsaved') {
     $el.html('<span class="w-1.5 h-1.5 rounded-full bg-amber-600 inline-block"></span><span>Perubahan belum disimpan</span>')
-       .removeClass('text-error text-primary').addClass('text-amber-700');
+      .removeClass('text-error text-primary').addClass('text-amber-700');
   } else if (state === 'saving') {
     $el.html('<i class="fa fa-spinner fa-spin text-[11px]"></i><span>Menyimpan...</span>')
-       .removeClass('text-error text-amber-700').addClass('text-primary');
+      .removeClass('text-error text-amber-700').addClass('text-primary');
   } else if (state === 'saved') {
     const timeLabel = detail ? ` · ${escapeHtml(detail)}` : '';
     $el.html(`<span class="w-1.5 h-1.5 rounded-full bg-emerald-600 inline-block"></span><span>Tersimpan${timeLabel}</span>`)
-       .removeClass('text-error text-amber-700').addClass('text-on-surface-variant');
+      .removeClass('text-error text-amber-700').addClass('text-on-surface-variant');
   } else if (state === 'error') {
     $el.html('<span class="material-symbols-outlined text-[14px]">error_outline</span><span>Gagal menyimpan</span> <button type="button" onclick="save_draft_manual()" class="underline border-0 bg-transparent text-error cursor-pointer p-0 font-semibold ml-1">Coba lagi</button>')
-       .removeClass('text-primary text-amber-700').addClass('text-error');
+      .removeClass('text-primary text-amber-700').addClass('text-error');
   }
 }
 
@@ -4532,7 +4543,7 @@ function submit_community_post() {
     success: function (res) {
       $btn.prop('disabled', false).text('Kirim ke Circle');
       $('#comm-post-textarea').val('');
-      window.communityComposerImages.forEach(x => { try { URL.revokeObjectURL(x.url); } catch (e) {} });
+      window.communityComposerImages.forEach(x => { try { URL.revokeObjectURL(x.url); } catch (e) { } });
       window.communityComposerImages = [];
       render_community_composer_previews();
       load_community_posts();
@@ -4746,4 +4757,171 @@ function submit_report_form() {
     }
   });
 }
+
+// ==========================================
+// FOLLOW REQUESTS & PRIVACY SUBSYSTEM (SWEETER V2)
+// ==========================================
+
+function follow_user(target_username) {
+  if (!target_username) return;
+  toggle_follow(target_username);
+}
+
+function cancel_follow_request_ui(target_username, btnSelector) {
+  if (!target_username) return;
+  let $btn = btnSelector ? $(btnSelector) : ($('#cancel-request-btn').length ? $('#cancel-request-btn') : $('#follow-btn'));
+  let $lockBtn = $('#private-lock-action-btn');
+
+  if ($btn.length) $btn.prop('disabled', true).addClass('opacity-75');
+  if ($lockBtn.length) $lockBtn.prop('disabled', true).addClass('opacity-75');
+
+  $.ajax({
+    type: 'POST',
+    url: `/api/follow_requests/${encodeURIComponent(target_username)}/cancel`,
+    success: function (res) {
+      if (res.result === 'success') {
+        if ($btn.length) {
+          $btn.attr('data-following', 'false')
+            .attr('data-requested', 'false')
+            .removeClass('bg-surface-container-high border text-on-surface group hover:bg-error-container hover:text-on-error-container')
+            .addClass('bg-primary-container text-on-primary hover:bg-primary border-0')
+            .html('Follow');
+        }
+        if ($lockBtn.length) {
+          $lockBtn.attr('onclick', `follow_user('${escapeHtml(target_username)}')`)
+            .removeClass('bg-surface-container-high text-on-surface border border-outline-variant/50')
+            .addClass('bg-primary-container text-on-primary hover:bg-primary border-0')
+            .html('<span class="material-symbols-outlined text-[18px]">person_add</span><span>Kirim Permintaan Mengikuti</span>');
+        }
+      } else {
+        alert(res.msg || 'Gagal membatalkan permintaan.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal membatalkan permintaan mengikuti.');
+    },
+    complete: function () {
+      if ($btn.length) $btn.prop('disabled', false).removeClass('opacity-75');
+      if ($lockBtn.length) $lockBtn.prop('disabled', false).removeClass('opacity-75');
+    }
+  });
+}
+
+function accept_follow_request_ui(requester_username, onDone) {
+  if (!requester_username) return;
+  let $card = $(`#follow-req-${requester_username}`);
+  let $acceptBtn = $card.find('.accept-btn');
+  let $rejectBtn = $card.find('.reject-btn');
+
+  $acceptBtn.prop('disabled', true).text('Menyetujui...');
+  $rejectBtn.prop('disabled', true);
+
+  $.ajax({
+    type: 'POST',
+    url: `/api/follow_requests/${encodeURIComponent(requester_username)}/accept`,
+    success: function (res) {
+      if (res.result === 'success') {
+        $card.fadeOut(300, function () {
+          $card.remove();
+          update_follow_requests_badge();
+          if (typeof onDone === 'function') onDone(true);
+        });
+      } else {
+        alert(res.msg || 'Gagal menyetujui permintaan.');
+        $acceptBtn.prop('disabled', false).text('Setujui');
+        $rejectBtn.prop('disabled', false);
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal menyetujui permintaan.');
+      $acceptBtn.prop('disabled', false).text('Setujui');
+      $rejectBtn.prop('disabled', false);
+    }
+  });
+}
+
+function reject_follow_request_ui(requester_username, onDone) {
+  if (!requester_username) return;
+  let $card = $(`#follow-req-${requester_username}`);
+  let $acceptBtn = $card.find('.accept-btn');
+  let $rejectBtn = $card.find('.reject-btn');
+
+  $rejectBtn.prop('disabled', true).text('Menolak...');
+  $acceptBtn.prop('disabled', true);
+
+  $.ajax({
+    type: 'POST',
+    url: `/api/follow_requests/${encodeURIComponent(requester_username)}/reject`,
+    success: function (res) {
+      if (res.result === 'success') {
+        $card.fadeOut(300, function () {
+          $card.remove();
+          update_follow_requests_badge();
+          if (typeof onDone === 'function') onDone(true);
+        });
+      } else {
+        alert(res.msg || 'Gagal menolak permintaan.');
+        $rejectBtn.prop('disabled', false).text('Tolak');
+        $acceptBtn.prop('disabled', false);
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal menolak permintaan.');
+      $rejectBtn.prop('disabled', false).text('Tolak');
+      $acceptBtn.prop('disabled', false);
+    }
+  });
+}
+
+function remove_follower_ui(follower_username, onDone) {
+  if (!follower_username) return;
+  if (!confirm(`Hapus @${follower_username} dari daftar pengikut Anda? Pengguna ini tidak akan dapat lagi melihat konten privat Anda.`)) {
+    return;
+  }
+
+  let $card = $(`#follower-item-${follower_username}`);
+  $.ajax({
+    type: 'POST',
+    url: `/api/followers/${encodeURIComponent(follower_username)}/remove`,
+    success: function (res) {
+      if (res.result === 'success') {
+        if ($card.length) {
+          $card.fadeOut(300, function () {
+            $card.remove();
+            let $count = $('#follower-count-display');
+            if ($count.length) {
+              let cur = parseInt($count.text(), 10) || 0;
+              if (cur > 0) $count.text(cur - 1);
+            }
+            if (typeof onDone === 'function') onDone(true);
+          });
+        }
+      } else {
+        alert(res.msg || 'Gagal menghapus pengikut.');
+      }
+    },
+    error: function (xhr) {
+      handle_ajax_error(xhr, 'Gagal menghapus pengikut.');
+    }
+  });
+}
+
+function update_follow_requests_badge() {
+  let count = $('#follow-requests-list .follow-req-card').length;
+  let $badge = $('#follow-requests-count-badge');
+  if ($badge.length) {
+    if (count > 0) {
+      $badge.text(count).removeClass('hidden');
+    } else {
+      $badge.addClass('hidden');
+      $('#follow-requests-list').html(`
+        <div class="p-8 text-center text-on-surface-variant">
+          <span class="material-symbols-outlined text-[36px] text-outline-variant mb-1">mark_email_read</span>
+          <p class="font-body-sm text-secondary">Tidak ada permintaan mengikuti pending saat ini.</p>
+        </div>
+      `);
+    }
+  }
+}
+
 

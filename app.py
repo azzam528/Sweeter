@@ -46,6 +46,11 @@ from database import (
     get_all_blocked_relation_usernames,
     is_muted,
     get_muted_usernames,
+    is_private_account,
+    is_account_deactivated,
+    has_pending_follow_request,
+    get_pending_follow_requests_count,
+    can_view_user_content,
 )
 from notifications import (
     create_notification,
@@ -115,7 +120,7 @@ app.config["SECRET_KEY"] = SECRET_KEY
 def get_current_user_from_token():
     """
     Mengambil dan memvalidasi token JWT dari cookie 'mytoken'.
-    Mengembalikan payload dict jika valid, atau None jika tidak valid/kadaluarsa/hilang/suspended.
+    Mengembalikan payload dict jika valid, atau None jika tidak valid/kadaluarsa/hilang/suspended/deactivated/token_version mismatch.
     """
     token_receive = request.cookies.get('mytoken')
     if not token_receive:
@@ -128,8 +133,18 @@ def get_current_user_from_token():
         )
         username = payload.get('id')
         if username:
-            user_doc = db.users.find_one({'username': username}, {'is_suspended': 1})
-            if user_doc and user_doc.get('is_suspended') is True:
+            user_doc = db.users.find_one(
+                {'username': username},
+                {'is_suspended': 1, 'is_deactivated': 1, 'token_version': 1}
+            )
+            if not user_doc:
+                return None
+            if user_doc.get('is_suspended') is True:
+                return None
+            if user_doc.get('is_deactivated') is True:
+                return None
+            token_ver = payload.get('token_version')
+            if token_ver is not None and token_ver < user_doc.get('token_version', 1):
                 return None
         return payload
     except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError, Exception):
@@ -233,9 +248,21 @@ def user(username):
         is_blocking_me = is_blocked(username, current_username) if not status else False
         is_muted_by_me = is_muted(current_username, username) if not status else False
         is_admin = is_admin_user(current_username)
+        is_deactivated = bool(user_info.get('is_deactivated'))
 
-        post_count = 0 if (is_blocked_by_me or is_blocking_me) else db.posts.count_documents({'username': username})
+        # Jika akun target dinonaktifkan dan bukan pemilik sendiri atau admin, isolasi akses
+        if is_deactivated and not status and not is_admin:
+            return render_template('404.html', username=username, current_user=current_user), 404
+
         is_following = bool(db.follows.find_one({'follower': current_username, 'following': username}))
+        has_requested = bool(db.follow_requests.find_one({'requester': current_username, 'target': username, 'status': 'pending'})) if not status else False
+        is_private = bool(user_info.get('is_private'))
+        is_private_locked = bool(is_private and not status and not is_following)
+
+        show_follow_counts = bool(user_info.get('show_follow_counts', True))
+        show_bio = bool(user_info.get('show_bio', True))
+
+        post_count = 0 if (is_blocked_by_me or is_blocking_me or is_deactivated) else db.posts.count_documents({'username': username})
         follower_count = db.follows.count_documents({'following': username})
         following_count = db.follows.count_documents({'follower': username})
         return render_template(
@@ -245,6 +272,11 @@ def user(username):
             status=status,
             post_count=post_count,
             is_following=is_following,
+            has_requested=has_requested,
+            is_private=is_private,
+            is_private_locked=is_private_locked,
+            show_follow_counts=show_follow_counts,
+            show_bio=show_bio,
             follower_count=follower_count,
             following_count=following_count,
             is_blocked_by_me=is_blocked_by_me,
@@ -308,8 +340,19 @@ def sign_in():
                 }
             ), 403
 
+        # Jika akun sebelumnya dinonaktifkan sementara (deactivated), aktifkan kembali secara otomatis
+        was_reactivated = False
+        if result.get("is_deactivated") is True:
+            db.users.update_one(
+                {"username": username_receive},
+                {"$set": {"is_deactivated": False, "deactivated_at": None}}
+            )
+            was_reactivated = True
+
+        token_ver = result.get('token_version', 1)
         payload = {
             "id": username_receive,
+            "token_version": token_ver,
             # token berlaku 24 jam (menggunakan datetime timezone UTC standar)
             "exp": datetime.now(timezone.utc) + timedelta(seconds=60 * 60 * 24),
         }
@@ -319,6 +362,8 @@ def sign_in():
             {
                 "result": "success",
                 "token": token,
+                "was_reactivated": was_reactivated,
+                "msg": "Welcome back! Your account has been reactivated." if was_reactivated else "Sign in successful"
             }
         )
         # Menetapkan cookie di response dengan SameSite=Lax dan secure sesuai environment
@@ -353,13 +398,22 @@ def sign_up():
     username_receive = request.form['username_give']
     password_receive = request.form['password_give']
     password_hash = hashlib.sha256(password_receive.encode('utf-8')).hexdigest()
+    now_iso = datetime.now(timezone.utc).isoformat()
     doc = {
         "username": username_receive,                               # id
         "password": password_hash,                                  # password
         "profile_name": username_receive,                           # user's name is set to their id by default
         "profile_pic": "",                                          # profile image file name
         "profile_pic_real": "profile_pics/profile_placeholder.png", # a default profile image
-        "profile_info": ""                                          # a profile description
+        "profile_info": "",                                         # a profile description
+        "email": "",
+        "is_private": False,
+        "show_follow_counts": True,
+        "show_bio": True,
+        "default_post_privacy": "public",
+        "is_deactivated": False,
+        "token_version": 1,
+        "created_at": now_iso
     }
     db.users.insert_one(doc)
     return jsonify({'result': 'success'})
@@ -660,24 +714,54 @@ def _get_user_joined_community_ids(username: str) -> list:
 def _user_can_access_post(post_doc: dict, current_username: str = None) -> bool:
     """
     Memastikan postingan dapat diakses oleh current_username:
-    1. Postingan dari akun yang memiliki relasi block (diblokir atau memblokir) tidak dapat diakses.
-    2. Postingan dari komunitas private tidak dapat diakses non-anggota.
-    Postingan publik dan komunitas public selalu dapat diakses.
+    1. Pemilik postingan (author) selalu berhak mengakses postingannya sendiri.
+    2. Postingan dari akun yang memiliki relasi block (diblokir atau memblokir) tidak dapat diakses.
+    3. Postingan dari akun yang dinonaktifkan (deactivated) tidak dapat diakses.
+    4. Post privacy:
+       - 'private': hanya pemilik postingan yang boleh mengakses.
+       - 'followers': hanya author dan follower yang disetujui (is_following).
+       - 'public': dapat diakses publik (asalkan akun author bukan akun privat).
+    5. Account privacy: jika akun author adalah akun privat, hanya author dan follower yang disetujui.
+    6. Community privacy: jika post berada dalam komunitas private, hanya anggota komunitas yang dapat mengakses.
     """
     if not post_doc:
         return False
 
     post_author = post_doc.get("username")
+    # Pemilik postingan selalu berhak mengakses kontennya sendiri
+    if current_username and post_author == current_username:
+        return True
+
+    # Isolasi relasi block dua arah
     if current_username and post_author:
         if has_block_relation(current_username, post_author):
             return False
 
-    if post_doc.get("community_visibility") != "private":
-        return True
-    cid = post_doc.get("community_id")
-    if not cid or not current_username:
+    # Isolasi akun author yang dinonaktifkan
+    if is_account_deactivated(post_author):
         return False
-    return _is_community_member(str(cid), current_username)
+
+    # Pemeriksaan Privasi Postingan
+    post_privacy = post_doc.get("privacy", "public")
+    if post_privacy == "private":
+        return False
+    elif post_privacy == "followers":
+        if not current_username or not is_following(current_username, post_author):
+            return False
+
+    # Pemeriksaan Privasi Akun Pembuat Postingan
+    if is_private_account(post_author):
+        if not current_username or not is_following(current_username, post_author):
+            return False
+
+    # Pemeriksaan Privasi Komunitas
+    if post_doc.get("community_visibility") == "private":
+        cid = post_doc.get("community_id")
+        if not cid or not current_username:
+            return False
+        return _is_community_member(str(cid), current_username)
+
+    return True
 
 
 def _private_post_visibility_filter(current_username: str = None) -> dict:
@@ -693,7 +777,7 @@ def _private_post_visibility_filter(current_username: str = None) -> dict:
     return {"community_visibility": {"$ne": "private"}}
 
 
-def _create_published_post(user_info: dict, comment_text: str, date_str: str = None, images_list: list = None, community: dict = None) -> dict:
+def _create_published_post(user_info: dict, comment_text: str, date_str: str = None, images_list: list = None, community: dict = None, privacy: str = 'public') -> dict:
     """
     Helper terpusat untuk memvalidasi dan membuat dokumen postingan publik/komunitas di db.posts.
     Digunakan bersama oleh POST /posting, POST /api/communities/<id>/posts, dan POST /api/drafts/<draft_id>/publish.
@@ -710,6 +794,7 @@ def _create_published_post(user_info: dict, comment_text: str, date_str: str = N
     if len(images_clean) > MAX_POST_IMAGES_COUNT:
         raise ValueError(f'Maksimal {MAX_POST_IMAGES_COUNT} gambar dalam satu postingan.')
 
+    privacy_clean = privacy if privacy in ('public', 'followers', 'private') else 'public'
     final_date = date_str or datetime.now(timezone.utc).isoformat()
     tags = extract_hashtags(comment_clean)
     doc = {
@@ -720,6 +805,7 @@ def _create_published_post(user_info: dict, comment_text: str, date_str: str = N
         'date': final_date,
         'hashtags': tags,
         'images': images_clean,
+        'privacy': privacy_clean,
     }
     if community:
         doc['community_id'] = str(community['_id'])
@@ -752,6 +838,7 @@ def posting():
 
     comment_receive = (request.form.get('comment_give') or request.form.get('comment') or '').strip()
     date_receive = request.form.get('date_give') or datetime.now(timezone.utc).isoformat()
+    privacy_receive = (request.form.get('privacy_give') or request.form.get('privacy') or user_info.get('default_post_privacy') or 'public').strip().lower()
 
     # Cek target komunitas opsional (jika user memposting ke dalam Circle/Community)
     community_id_raw = (request.form.get('community_id') or '').strip()
@@ -812,6 +899,7 @@ def posting():
             date_str=date_receive,
             images_list=saved_images,
             community=target_community,
+            privacy=privacy_receive,
         )
         return jsonify({
             'result': 'success',
@@ -997,6 +1085,10 @@ def enrich_posts_metadata(posts, current_username, is_profile_view_for=None):
             if p_author in muted_users and p_author != is_profile_view_for:
                 continue
 
+            # Pemeriksaan hak akses postingan (Post Privacy, Account Privacy, Status Deaktif, Komunitas)
+            if not _user_can_access_post(post, current_username):
+                continue
+
             # Jika merupakan repost, periksa author postingan asli
             if post.get('post_type') == 'repost':
                 orig_p = post.get('original_post')
@@ -1041,7 +1133,7 @@ def get_posts():
         return jsonify({'result': 'fail', 'msg': 'Session expired or invalid'}), 401
 
     # 1. Parsing & validasi parameter
-    username_receive = request.args.get('username_give', '').strip()
+    username_receive = (request.args.get('username_give') or request.args.get('username') or '').strip()
     tab = request.args.get('tab', '').lower().strip()
     cursor = request.args.get('cursor', '').strip()
     limit_raw = request.args.get('limit', '20').strip()
@@ -1070,18 +1162,67 @@ def get_posts():
                 'has_more': False,
                 'tab': 'profile'
             }), 200
-        query = {'$and': [{'username': username_receive}, visibility_filter]}
-    elif tab in ['following', 'timeline']:
-        # Mode Personalized Timeline: postingan diri sendiri + akun yang diikuti (tanpa yang diblokir atau dimute)
-        following_users = db.follows.distinct('following', {'follower': current_username})
-        allowed_authors = [u for u in ([current_username] + following_users) if u not in excluded_authors]
-        query = {'$and': [{'username': {'$in': allowed_authors}}, visibility_filter]}
-    else:
-        # Mode Explore / All / Default: postingan publik (tanpa akun yang diblokir atau dimute)
-        if excluded_authors:
-            query = {'$and': [{'username': {'$nin': list(excluded_authors)}}, visibility_filter]}
+
+        # Jika akun author dinonaktifkan (deactivated)
+        if is_account_deactivated(username_receive):
+            return jsonify({
+                'result': 'success',
+                'msg': 'Akun ini sedang dinonaktifkan',
+                'posts': [],
+                'next_cursor': None,
+                'has_more': False,
+                'tab': 'profile'
+            }), 200
+
+        # Jika akun privat dan bukan milik sendiri dan belum menjadi follower yang disetujui
+        if is_private_account(username_receive) and (current_username != username_receive) and not is_following(current_username, username_receive):
+            return jsonify({
+                'result': 'success',
+                'msg': 'Akun ini bersifat privat. Ikuti akun ini untuk melihat postingannya.',
+                'posts': [],
+                'is_private_locked': True,
+                'next_cursor': None,
+                'has_more': False,
+                'tab': 'profile'
+            }), 200
+
+        # Jika melihat profil orang lain (sebagai follower): jangan tampilkan postingan 'private' milik mereka
+        if current_username != username_receive:
+            query = {
+                '$and': [
+                    {'username': username_receive},
+                    {'$or': [
+                        {'privacy': {'$in': ['public', 'followers']}},
+                        {'privacy': {'$exists': False}}
+                    ]},
+                    visibility_filter
+                ]
+            }
         else:
-            query = visibility_filter
+            query = {'$and': [{'username': username_receive}, visibility_filter]}
+    elif tab in ['following', 'timeline']:
+        # Mode Personalized Timeline: postingan diri sendiri + akun yang diikuti (tanpa yang diblokir, dimute, atau dinonaktifkan)
+        deactivated_users = set(db.users.distinct('username', {'is_deactivated': True}))
+        following_users = db.follows.distinct('following', {'follower': current_username})
+        allowed_authors = [u for u in ([current_username] + following_users) if u not in (excluded_authors | deactivated_users)]
+        timeline_privacy_filter = {
+            '$or': [
+                {'username': current_username},
+                {'privacy': {'$in': ['public', 'followers']}},
+                {'privacy': {'$exists': False}}
+            ]
+        }
+        query = {'$and': [{'username': {'$in': allowed_authors}}, timeline_privacy_filter, visibility_filter]}
+    else:
+        # Mode Explore / All / Default: postingan publik (tanpa akun diblokir/dimute, bukan akun privat, bukan followers-only, bukan deactivated)
+        private_users = set(db.users.distinct('username', {'is_private': True}))
+        deactivated_users = set(db.users.distinct('username', {'is_deactivated': True}))
+        explore_excluded = excluded_authors | private_users | deactivated_users
+        public_privacy_filter = {'$or': [{'privacy': 'public'}, {'privacy': {'$exists': False}}]}
+        if explore_excluded:
+            query = {'$and': [{'username': {'$nin': list(explore_excluded)}}, public_privacy_filter, visibility_filter]}
+        else:
+            query = {'$and': [public_privacy_filter, visibility_filter]}
 
     # 3. Penanganan Cursor Pagination (Keyset Pagination)
     if cursor:
@@ -1125,6 +1266,7 @@ def get_posts():
         'posts': posts,
         'next_cursor': next_cursor,
         'has_more': has_more,
+        'is_private_locked': False,
         'tab': tab if not username_receive else 'profile'
     }), 200    
     
@@ -1580,7 +1722,71 @@ def follow_user(target_username=None):
             'msg': 'Cannot follow this user due to block restrictions'
         }), 403
 
-    # Aturan 4: Cegah duplicate follow (race-safe & idempotent)
+    # Aturan 4: Jika target adalah akun privat, alihkan ke sistem Follow Request
+    if target_user.get('is_private') is True:
+        already_following = db.follows.find_one({'follower': current_username, 'following': target})
+        if already_following:
+            follower_count = db.follows.count_documents({'following': target})
+            following_count = db.follows.count_documents({'follower': current_username})
+            return jsonify({
+                'result': 'fail',
+                'msg': 'You are already following this user',
+                'is_following': True,
+                'is_requested': False,
+                'follower_count': follower_count,
+                'following_count': following_count
+            }), 409
+
+        existing_req = db.follow_requests.find_one({
+            'requester': current_username,
+            'target': target,
+            'status': 'pending'
+        })
+        if existing_req:
+            follower_count = db.follows.count_documents({'following': target})
+            following_count = db.follows.count_documents({'follower': current_username})
+            return jsonify({
+                'result': 'fail',
+                'msg': 'Permintaan mengikuti sudah dikirim dan sedang menunggu persetujuan.',
+                'is_following': False,
+                'is_requested': True,
+                'follower_count': follower_count,
+                'following_count': following_count
+            }), 409
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        db.follow_requests.update_one(
+            {'requester': current_username, 'target': target},
+            {
+                '$set': {
+                    'status': 'pending',
+                    'updated_at': now_iso
+                },
+                '$setOnInsert': {
+                    'created_at': now_iso
+                }
+            },
+            upsert=True
+        )
+
+        create_notification(
+            recipient=target,
+            actor=current_username,
+            notif_type='follow_request'
+        )
+
+        follower_count = db.follows.count_documents({'following': target})
+        following_count = db.follows.count_documents({'follower': current_username})
+        return jsonify({
+            'result': 'success',
+            'msg': f'Permintaan mengikuti telah dikirim ke @{target}',
+            'is_following': False,
+            'is_requested': True,
+            'follower_count': follower_count,
+            'following_count': following_count
+        }), 200
+
+    # Aturan 5: Cegah duplicate follow (race-safe & idempotent)
     existing = db.follows.find_one({'follower': current_username, 'following': target})
     if existing:
         follower_count = db.follows.count_documents({'following': target})
@@ -1589,6 +1795,7 @@ def follow_user(target_username=None):
             'result': 'fail',
             'msg': 'You are already following this user',
             'is_following': True,
+            'is_requested': False,
             'follower_count': follower_count,
             'following_count': following_count
         }), 409
@@ -1607,6 +1814,7 @@ def follow_user(target_username=None):
             'result': 'fail',
             'msg': 'You are already following this user',
             'is_following': True,
+            'is_requested': False,
             'follower_count': follower_count,
             'following_count': following_count
         }), 409
@@ -1625,6 +1833,7 @@ def follow_user(target_username=None):
         'result': 'success',
         'msg': f'Successfully followed {target}',
         'is_following': True,
+        'is_requested': False,
         'follower_count': follower_count,
         'following_count': following_count
     }), 200
@@ -1654,8 +1863,9 @@ def unfollow_user(target_username=None):
     if current_username == target:
         return jsonify({'result': 'fail', 'msg': 'You cannot unfollow yourself'}), 400
 
-    # Hapus relasi follow secara aman
+    # Hapus relasi follow secara aman dan batalkan permintaan follow jika ada
     db.follows.delete_one({'follower': current_username, 'following': target})
+    db.follow_requests.delete_many({'requester': current_username, 'target': target})
 
     follower_count = db.follows.count_documents({'following': target})
     following_count = db.follows.count_documents({'follower': current_username})
@@ -1693,6 +1903,8 @@ def follow_status():
         return jsonify({'result': 'fail', 'msg': 'User not found'}), 404
 
     is_following = bool(db.follows.find_one({'follower': current_username, 'following': target}))
+    has_requested = has_pending_follow_request(current_username, target)
+    is_private_val = is_private_account(target)
     follower_count = db.follows.count_documents({'following': target})
     following_count = db.follows.count_documents({'follower': target})
 
@@ -1700,6 +1912,8 @@ def follow_status():
         'result': 'success',
         'target_username': target,
         'is_following': is_following,
+        'is_requested': has_requested,
+        'is_private': is_private_val,
         'follower_count': follower_count,
         'following_count': following_count
     }), 200
@@ -1726,6 +1940,11 @@ def get_user_followers_api(username):
 
     if current_username and has_block_relation(current_username, username):
         return jsonify({'result': 'fail', 'msg': 'Cannot access followers list due to block restrictions'}), 403
+
+    if target_user.get('is_private') and current_username != username:
+        is_following_target = bool(current_username and is_following(current_username, username))
+        if not is_following_target and not is_admin_user(current_username):
+            return jsonify({'result': 'fail', 'msg': 'This account is private. Follow to view followers.'}), 403
 
     blocked_related = get_all_blocked_relation_usernames(current_username) if current_username else set()
     follow_docs = list(db.follows.find({'following': username}).sort('created_at', -1))
@@ -1786,6 +2005,11 @@ def get_user_following_api(username):
 
     if current_username and has_block_relation(current_username, username):
         return jsonify({'result': 'fail', 'msg': 'Cannot access following list due to block restrictions'}), 403
+
+    if target_user.get('is_private') and current_username != username:
+        is_following_target = bool(current_username and is_following(current_username, username))
+        if not is_following_target and not is_admin_user(current_username):
+            return jsonify({'result': 'fail', 'msg': 'This account is private. Follow to view following.'}), 403
 
     blocked_related = get_all_blocked_relation_usernames(current_username) if current_username else set()
     follow_docs = list(db.follows.find({'follower': username}).sort('created_at', -1))
@@ -1890,6 +2114,709 @@ def user_following_page(username):
     except (jwt.ExpiredSignatureError, jwt.exceptions.PyJWTError):
         return redirect(url_for('home'))  
 
+
+# ==========================================
+# FOLLOW REQUESTS SUBSYSTEM
+# ==========================================
+
+@app.route('/api/follow_requests', methods=['GET'])
+def get_incoming_follow_requests():
+    """
+    Mengambil daftar permintaan follow masuk untuk akun pengguna saat ini (yang berstatus 'pending').
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    req_docs = list(db.follow_requests.find({'target': current_username, 'status': 'pending'}).sort('created_at', -1))
+    requester_names = [r['requester'] for r in req_docs]
+
+    user_docs = {
+        u['username']: u
+        for u in db.users.find({'username': {'$in': requester_names}}, {'password': 0})
+    }
+
+    requests_list = []
+    for r in req_docs:
+        uname = r['requester']
+        u = user_docs.get(uname)
+        requests_list.append({
+            'id': str(r['_id']),
+            'requester': uname,
+            'profile_name': u.get('profile_name', uname) if u else uname,
+            'profile_pic_real': u.get('profile_pic_real', 'profile_pics/profile_placeholder.png') if u else 'profile_pics/profile_placeholder.png',
+            'profile_info': u.get('profile_info', '') if u else '',
+            'created_at': r.get('created_at', '')
+        })
+
+    return jsonify({
+        'result': 'success',
+        'total': len(requests_list),
+        'requests': requests_list,
+        'follow_requests': requests_list
+    }), 200
+
+
+@app.route('/api/follow_requests/<requester_username>/accept', methods=['POST'])
+def accept_follow_request(requester_username):
+    """
+    Menyetujui permintaan follow dari requester_username.
+    Membuat relasi di db.follows dan mengirimkan notifikasi.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    req = db.follow_requests.find_one({
+        'requester': requester_username,
+        'target': current_username,
+        'status': 'pending'
+    })
+    if not req:
+        return jsonify({'result': 'fail', 'msg': 'Permintaan follow tidak ditemukan atau sudah diproses'}), 404
+
+    db.follow_requests.delete_one({'_id': req['_id']})
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        db.follows.insert_one({
+            'follower': requester_username,
+            'following': current_username,
+            'created_at': now_iso
+        })
+    except DuplicateKeyError:
+        pass
+
+    create_notification(
+        recipient=requester_username,
+        actor=current_username,
+        notif_type='follow_request_accepted'
+    )
+
+    follower_count = db.follows.count_documents({'following': current_username})
+    return jsonify({
+        'result': 'success',
+        'msg': f'Permintaan mengikuti dari @{requester_username} telah disetujui',
+        'follower_count': follower_count
+    }), 200
+
+
+@app.route('/api/follow_requests/<requester_username>/reject', methods=['POST'])
+def reject_follow_request(requester_username):
+    """
+    Menolak permintaan follow dari requester_username.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    req = db.follow_requests.find_one({
+        'requester': requester_username,
+        'target': current_username,
+        'status': 'pending'
+    })
+    if not req:
+        return jsonify({'result': 'fail', 'msg': 'Permintaan follow tidak ditemukan atau sudah diproses'}), 404
+
+    db.follow_requests.delete_one({'_id': req['_id']})
+
+    return jsonify({
+        'result': 'success',
+        'msg': f'Permintaan mengikuti dari @{requester_username} telah ditolak'
+    }), 200
+
+
+@app.route('/api/follow_requests/<target_username>/cancel', methods=['POST'])
+@app.route('/api/follow_requests/cancel', methods=['POST'])
+def cancel_follow_request(target_username=None):
+    """
+    Membatalkan permintaan follow yang telah dikirim oleh pengguna saat ini kepada target.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    target = _extract_target_username(target_username)
+    if not target:
+        return jsonify({'result': 'fail', 'msg': 'Target username is required'}), 400
+
+    db.follow_requests.delete_many({
+        'requester': current_username,
+        'target': target,
+        'status': 'pending'
+    })
+
+    db.notifications.delete_many({
+        'recipient': target,
+        'actor': current_username,
+        'type': 'follow_request'
+    })
+
+    follower_count = db.follows.count_documents({'following': target})
+    following_count = db.follows.count_documents({'follower': current_username})
+
+    return jsonify({
+        'result': 'success',
+        'msg': f'Permintaan mengikuti ke @{target} telah dibatalkan',
+        'is_requested': False,
+        'is_following': False,
+        'follower_count': follower_count,
+        'following_count': following_count
+    }), 200
+
+
+@app.route('/api/followers/<follower_username>/remove', methods=['POST'])
+def remove_follower(follower_username):
+    """
+    Menghapus follower dari akun pengguna saat ini (mencabut akses terhadap konten privat).
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    if not follower_username:
+        return jsonify({'result': 'fail', 'msg': 'Follower username is required'}), 400
+
+    db.follows.delete_one({'follower': follower_username, 'following': current_username})
+    follower_count = db.follows.count_documents({'following': current_username})
+
+    return jsonify({
+        'result': 'success',
+        'msg': f'@{follower_username} telah dihapus dari daftar pengikut Anda',
+        'follower_count': follower_count
+    }), 200
+
+
+# ==========================================
+# ACCOUNT & PRIVACY SETTINGS SUBSYSTEM
+# ==========================================
+
+EMAIL_REGEX = re.compile(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$')
+USERNAME_REGEX = re.compile(r'^[a-zA-Z0-9_]{3,30}$')
+RESERVED_USERNAMES = {'admin', 'settings', 'login', 'logout', 'sign_in', 'sign_out', 'sign_up', 'api', 'about', 'explore', 'notifications', 'community', 'communities', 'blocked', 'muted'}
+
+
+@app.route('/settings', methods=['GET'])
+def settings_page():
+    """Halaman Pengaturan Akun, Privasi, Keamanan, dan Manajemen Akun."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return redirect(url_for('login'))
+
+    current_username = payload.get('id')
+    user_info = db.users.find_one({'username': current_username}, {'password': 0})
+    if not user_info:
+        return redirect(url_for('login'))
+
+    unread_count = get_unread_count(current_username)
+    is_admin = is_admin_user(current_username)
+    pending_requests_count = get_pending_follow_requests_count(current_username)
+
+    return render_template(
+        'settings.html',
+        user_info=user_info,
+        unread_count=unread_count,
+        is_admin=is_admin,
+        pending_requests_count=pending_requests_count
+    )
+
+
+@app.route('/api/account/settings', methods=['GET'])
+def get_account_settings_api():
+    """Mengambil data pengaturan akun dan privasi saat ini bagi pengguna yang login."""
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    user_doc = db.users.find_one({'username': current_username}, {'password': 0})
+    if not user_doc:
+        return jsonify({'result': 'fail', 'msg': 'User not found'}), 404
+
+    return jsonify({
+        'result': 'success',
+        'settings': {
+            'username': user_doc.get('username'),
+            'profile_name': user_doc.get('profile_name', user_doc.get('username')),
+            'profile_info': user_doc.get('profile_info', ''),
+            'profile_pic_real': user_doc.get('profile_pic_real', 'profile_pics/profile_placeholder.png'),
+            'email': user_doc.get('email', ''),
+            'is_private': bool(user_doc.get('is_private', False)),
+            'show_follow_counts': bool(user_doc.get('show_follow_counts', True)),
+            'show_bio': bool(user_doc.get('show_bio', True)),
+            'default_post_privacy': user_doc.get('default_post_privacy', 'public'),
+            'created_at': user_doc.get('created_at', ''),
+            'pending_requests_count': get_pending_follow_requests_count(current_username)
+        }
+    }), 200
+
+
+@app.route('/api/account/profile', methods=['POST'])
+def update_account_profile():
+    """
+    Memperbarui profil akun:
+    - Display Name (profile_name)
+    - Bio (profile_info)
+    - Email (validasi format dan keunikan)
+    - Profile Picture
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    data = request.get_json(silent=True) or request.form or {}
+
+    display_name = data.get('profile_name') or data.get('display_name') or data.get('name_give')
+    bio = data.get('profile_info') or data.get('bio') or data.get('about_give')
+    email = data.get('email')
+
+    update_fields = {}
+
+    if display_name is not None:
+        name_clean = str(display_name).strip()
+        if len(name_clean) > 50:
+            return jsonify({'result': 'fail', 'msg': 'Display name cannot exceed 50 characters'}), 400
+        if not name_clean:
+            return jsonify({'result': 'fail', 'msg': 'Display name cannot be empty'}), 400
+        update_fields['profile_name'] = name_clean
+
+    if bio is not None:
+        bio_clean = str(bio).strip()
+        if len(bio_clean) > 500:
+            return jsonify({'result': 'fail', 'msg': 'Bio cannot exceed 500 characters'}), 400
+        update_fields['profile_info'] = bio_clean
+
+    if email is not None:
+        email_clean = str(email).strip().lower()
+        if email_clean:
+            if not EMAIL_REGEX.match(email_clean):
+                return jsonify({'result': 'fail', 'msg': 'Format email tidak valid'}), 400
+            duplicate = db.users.find_one({'email': email_clean, 'username': {'$ne': current_username}})
+            if duplicate:
+                return jsonify({'result': 'fail', 'msg': 'Email sudah digunakan oleh akun lain'}), 409
+        update_fields['email'] = email_clean
+
+    if 'file_give' in request.files or 'profile_image' in request.files:
+        file = request.files.get('file_give') or request.files.get('profile_image')
+        if file and file.filename != '':
+            raw_bytes = file.read()
+            detected = _detect_image_format(raw_bytes)
+            if not detected:
+                return jsonify({'result': 'fail', 'msg': 'Format gambar tidak didukung (gunakan JPG, PNG, GIF, atau WebP)'}), 400
+            ext = file.filename.split('.')[-1].lower()
+            filename = f"{current_username}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
+            file_path = f"/profile_pics/{filename}"
+            target_dir = os.path.join(app.root_path, 'static', 'profile_pics')
+            os.makedirs(target_dir, exist_ok=True)
+            with open(os.path.join(target_dir, filename), 'wb') as f:
+                f.write(raw_bytes)
+            update_fields['profile_pic'] = filename
+            update_fields['profile_pic_real'] = file_path
+
+    if update_fields:
+        db.users.update_one({'username': current_username}, {'$set': update_fields})
+
+    updated_user = db.users.find_one({'username': current_username}, {'password': 0})
+    return jsonify({
+        'result': 'success',
+        'msg': 'Profil akun berhasil diperbarui',
+        'user': {
+            'username': updated_user.get('username'),
+            'profile_name': updated_user.get('profile_name'),
+            'profile_info': updated_user.get('profile_info'),
+            'profile_pic_real': updated_user.get('profile_pic_real'),
+            'email': updated_user.get('email', '')
+        }
+    }), 200
+
+
+@app.route('/api/account/change_username', methods=['POST'])
+def change_username():
+    """
+    Mengubah username pengguna dengan validasi format dan keunikan menyeluruh,
+    serta melakukan cascading update ke seluruh koleksi terkait dan menerbitkan token JWT baru.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    data = request.get_json(silent=True) or request.form or {}
+    new_username = (data.get('new_username') or '').strip().lower()
+
+    if not new_username:
+        return jsonify({'result': 'fail', 'msg': 'New username is required'}), 400
+
+    if new_username == current_username:
+        return jsonify({'result': 'fail', 'msg': 'Username baru sama dengan username saat ini'}), 400
+
+    if not USERNAME_REGEX.match(new_username):
+        return jsonify({'result': 'fail', 'msg': 'Username harus terdiri dari 3-30 karakter alfanumerik atau garis bawah (_)'}), 400
+
+    if new_username in RESERVED_USERNAMES:
+        return jsonify({'result': 'fail', 'msg': 'Username ini dicadangkan untuk sistem'}), 400
+
+    if db.users.find_one({'username': new_username}):
+        return jsonify({'result': 'fail', 'msg': 'Username sudah digunakan'}), 409
+
+    db.users.update_one({'username': current_username}, {'$set': {'username': new_username}})
+    db.posts.update_many({'username': current_username}, {'$set': {'username': new_username}})
+    db.comments.update_many({'username': current_username}, {'$set': {'username': new_username}})
+    db.follows.update_many({'follower': current_username}, {'$set': {'follower': new_username}})
+    db.follows.update_many({'following': current_username}, {'$set': {'following': new_username}})
+    db.follow_requests.update_many({'requester': current_username}, {'$set': {'requester': new_username}})
+    db.follow_requests.update_many({'target': current_username}, {'$set': {'target': new_username}})
+    db.bookmarks.update_many({'username': current_username}, {'$set': {'username': new_username}})
+    db.blocks.update_many({'blocker': current_username}, {'$set': {'blocker': new_username}})
+    db.blocks.update_many({'blocked': current_username}, {'$set': {'blocked': new_username}})
+    db.mutes.update_many({'muter': current_username}, {'$set': {'muter': new_username}})
+    db.mutes.update_many({'muted': current_username}, {'$set': {'muted': new_username}})
+    db.notifications.update_many({'recipient': current_username}, {'$set': {'recipient': new_username}})
+    db.notifications.update_many({'actor': current_username}, {'$set': {'actor': new_username}})
+    db.reports.update_many({'reporter_id': current_username}, {'$set': {'reporter_id': new_username}})
+    db.reports.update_many({'target_author': current_username}, {'$set': {'target_author': new_username}})
+    db.reports.update_many({'target_type': 'user', 'target_id': current_username}, {'$set': {'target_id': new_username}})
+    if hasattr(db, 'community_members'):
+        db.community_members.update_many({'user_id': current_username}, {'$set': {'user_id': new_username}})
+
+    user_doc = db.users.find_one({'username': new_username})
+    new_payload = {
+        'id': new_username,
+        'token_version': user_doc.get('token_version', 1),
+        'exp': datetime.now(timezone.utc) + timedelta(seconds=60 * 60 * 24)
+    }
+    new_token = jwt.encode(new_payload, SECRET_KEY, algorithm='HS256')
+
+    response = jsonify({
+        'result': 'success',
+        'msg': f'Username berhasil diubah menjadi @{new_username}',
+        'new_username': new_username,
+        'token': new_token
+    })
+    response.set_cookie('mytoken', new_token, max_age=60 * 60 * 24, path='/', samesite='Lax', secure=IS_PRODUCTION)
+    return response, 200
+
+
+@app.route('/api/account/change_password', methods=['POST'])
+def change_password():
+    """
+    Mengubah password pengguna dengan memverifikasi password lama terlebih dahulu.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    user_doc = db.users.find_one({'username': current_username})
+    if not user_doc:
+        return jsonify({'result': 'fail', 'msg': 'User not found'}), 404
+
+    data = request.get_json(silent=True) or request.form or {}
+    old_password = data.get('old_password') or data.get('current_password') or ''
+    new_password = data.get('new_password') or ''
+    confirm_password = data.get('confirm_password')
+
+    if not old_password or not new_password:
+        return jsonify({'result': 'fail', 'msg': 'Password lama dan password baru wajib diisi'}), 400
+
+    old_pw_hash = hashlib.sha256(old_password.encode('utf-8')).hexdigest()
+    if old_pw_hash != user_doc.get('password'):
+        return jsonify({'result': 'fail', 'msg': 'Password saat ini tidak sesuai'}), 400
+
+    if len(new_password) < 6:
+        return jsonify({'result': 'fail', 'msg': 'Password baru minimal harus 6 karakter'}), 400
+
+    if confirm_password is not None and confirm_password != new_password:
+        return jsonify({'result': 'fail', 'msg': 'Konfirmasi password baru tidak cocok'}), 400
+
+    new_pw_hash = hashlib.sha256(new_password.encode('utf-8')).hexdigest()
+    new_token_ver = user_doc.get('token_version', 1) + 1
+
+    db.users.update_one(
+        {'username': current_username},
+        {
+            '$set': {
+                'password': new_pw_hash,
+                'token_version': new_token_ver,
+                'password_updated_at': datetime.now(timezone.utc).isoformat()
+            }
+        }
+    )
+
+    new_payload = {
+        'id': current_username,
+        'token_version': new_token_ver,
+        'exp': datetime.now(timezone.utc) + timedelta(seconds=60 * 60 * 24)
+    }
+    new_token = jwt.encode(new_payload, SECRET_KEY, algorithm='HS256')
+
+    response = jsonify({
+        'result': 'success',
+        'msg': 'Password berhasil diperbarui',
+        'token': new_token
+    })
+    response.set_cookie('mytoken', new_token, max_age=60 * 60 * 24, path='/', samesite='Lax', secure=IS_PRODUCTION)
+    return response, 200
+
+
+@app.route('/api/account/privacy', methods=['POST'])
+def update_privacy_settings():
+    """
+    Mengubah pengaturan privasi akun:
+    - is_private (True/False)
+    - show_follow_counts (True/False)
+    - show_bio (True/False)
+    - default_post_privacy ('public', 'followers', 'private')
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    data = request.get_json(silent=True) or request.form or {}
+
+    update_fields = {}
+
+    if 'is_private' in data:
+        val = data.get('is_private')
+        if isinstance(val, str):
+            val = val.lower() in ('true', '1', 'yes')
+        update_fields['is_private'] = bool(val)
+
+    if 'show_follow_counts' in data:
+        val = data.get('show_follow_counts')
+        if isinstance(val, str):
+            val = val.lower() in ('true', '1', 'yes')
+        update_fields['show_follow_counts'] = bool(val)
+
+    if 'show_bio' in data:
+        val = data.get('show_bio')
+        if isinstance(val, str):
+            val = val.lower() in ('true', '1', 'yes')
+        update_fields['show_bio'] = bool(val)
+
+    if 'default_post_privacy' in data:
+        val = str(data.get('default_post_privacy')).strip().lower()
+        if val in ('public', 'followers', 'private'):
+            update_fields['default_post_privacy'] = val
+
+    if update_fields:
+        db.users.update_one({'username': current_username}, {'$set': update_fields})
+
+    updated_user = db.users.find_one({'username': current_username}, {'password': 0})
+    return jsonify({
+        'result': 'success',
+        'msg': 'Pengaturan privasi berhasil diperbarui',
+        'privacy': {
+            'is_private': bool(updated_user.get('is_private', False)),
+            'show_follow_counts': bool(updated_user.get('show_follow_counts', True)),
+            'show_bio': bool(updated_user.get('show_bio', True)),
+            'default_post_privacy': updated_user.get('default_post_privacy', 'public')
+        }
+    }), 200
+
+
+@app.route('/api/account/deactivate', methods=['POST'])
+def deactivate_account():
+    """
+    Menonaktifkan akun secara sementara. Memerlukan konfirmasi password.
+    Menghapus cookie sesi aktif.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    user_doc = db.users.find_one({'username': current_username})
+    if not user_doc:
+        return jsonify({'result': 'fail', 'msg': 'User not found'}), 404
+
+    data = request.get_json(silent=True) or request.form or {}
+    password = data.get('password') or ''
+    if not password:
+        return jsonify({'result': 'fail', 'msg': 'Password konfirmasi wajib diisi'}), 400
+
+    pw_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    if pw_hash != user_doc.get('password'):
+        return jsonify({'result': 'fail', 'msg': 'Password tidak sesuai'}), 400
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    new_token_ver = user_doc.get('token_version', 1) + 1
+    db.users.update_one(
+        {'username': current_username},
+        {
+            '$set': {
+                'is_deactivated': True,
+                'deactivated_at': now_iso,
+                'token_version': new_token_ver
+            }
+        }
+    )
+
+    response = jsonify({
+        'result': 'success',
+        'msg': 'Akun Anda berhasil dinonaktifkan sementara. Anda dapat mengaktifkannya kembali kapan saja dengan masuk kembali.'
+    })
+    response.delete_cookie('mytoken', path='/')
+    return response, 200
+
+
+@app.route('/api/account/reactivate', methods=['POST'])
+def reactivate_account():
+    """
+    Mengaktifkan kembali akun yang sedang dinonaktifkan.
+    """
+    data = request.get_json(silent=True) or request.form or {}
+    username = (data.get('username') or data.get('username_give') or '').strip()
+    password = data.get('password') or data.get('password_give') or ''
+
+    if not username or not password:
+        return jsonify({'result': 'fail', 'msg': 'Username dan password wajib diisi'}), 400
+
+    pw_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    user_doc = db.users.find_one({'username': username, 'password': pw_hash})
+    if not user_doc:
+        return jsonify({'result': 'fail', 'msg': 'Username atau password tidak sesuai'}), 401
+
+    if user_doc.get('is_suspended') is True:
+        return jsonify({'result': 'fail', 'msg': 'Akun Anda sedang ditangguhkan oleh administrator'}), 403
+
+    db.users.update_one(
+        {'username': username},
+        {
+            '$set': {
+                'is_deactivated': False,
+                'deactivated_at': None
+            }
+        }
+    )
+
+    token_ver = user_doc.get('token_version', 1)
+    payload = {
+        'id': username,
+        'token_version': token_ver,
+        'exp': datetime.now(timezone.utc) + timedelta(seconds=60 * 60 * 24)
+    }
+    token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+
+    response = jsonify({
+        'result': 'success',
+        'msg': 'Akun Anda berhasil diaktifkan kembali. Selamat datang kembali di Sweeter!',
+        'token': token
+    })
+    response.set_cookie('mytoken', token, max_age=60 * 60 * 24, path='/', samesite='Lax', secure=IS_PRODUCTION)
+    return response, 200
+
+
+@app.route('/api/account/delete', methods=['POST'])
+def delete_account():
+    """
+    Menghapus akun secara permanen beserta seluruh relasi data terkait
+    (posts, comments, replies, reactions, bookmarks, follows, follow requests, blocks, mutes, notifications).
+    Memerlukan konfirmasi password.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    user_doc = db.users.find_one({'username': current_username})
+    if not user_doc:
+        return jsonify({'result': 'fail', 'msg': 'User not found'}), 404
+
+    data = request.get_json(silent=True) or request.form or {}
+    password = data.get('password') or ''
+    if not password:
+        return jsonify({'result': 'fail', 'msg': 'Password konfirmasi wajib diisi untuk menghapus akun'}), 400
+
+    pw_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    if pw_hash != user_doc.get('password'):
+        return jsonify({'result': 'fail', 'msg': 'Password tidak sesuai'}), 400
+
+    # 1. Hapus gambar-gambar fisik postingan milik user
+    user_posts = list(db.posts.find({'username': current_username}))
+    for p in user_posts:
+        if p.get('post_type') != 'repost':
+            for img in (p.get('images') or []):
+                if isinstance(img, dict) and img.get('filename'):
+                    safe_delete_post_image(img['filename'], check_db_refs=False)
+
+    post_ids = [str(p['_id']) for p in user_posts]
+
+    # 2. Hapus seluruh data postingan & reposts terkait
+    db.posts.delete_many({'username': current_username})
+    if post_ids:
+        db.posts.delete_many({'original_post_id': {'$in': post_ids}})
+        db.comments.delete_many({'post_id': {'$in': post_ids}})
+        db.bookmarks.delete_many({'post_id': {'$in': post_ids}})
+        db.likes.delete_many({'post_id': {'$in': post_ids}})
+        db.stars.delete_many({'post_id': {'$in': post_ids}})
+        db.thumbs.delete_many({'post_id': {'$in': post_ids}})
+        for pid in post_ids:
+            cleanup_notifications_for_post(pid)
+
+    # 3. Hapus interaksi yang dilakukan oleh user
+    db.comments.delete_many({'username': current_username})
+    db.bookmarks.delete_many({'username': current_username})
+    db.likes.delete_many({'username': current_username})
+    db.stars.delete_many({'username': current_username})
+    db.thumbs.delete_many({'username': current_username})
+
+    # 4. Hapus relasi follow & follow requests
+    db.follows.delete_many({'$or': [{'follower': current_username}, {'following': current_username}]})
+    db.follow_requests.delete_many({'$or': [{'requester': current_username}, {'target': current_username}]})
+
+    # 5. Hapus relasi block & mute
+    db.blocks.delete_many({'$or': [{'blocker': current_username}, {'blocked': current_username}]})
+    db.mutes.delete_many({'$or': [{'muter': current_username}, {'muted': current_username}]})
+
+    # 6. Hapus notifikasi
+    db.notifications.delete_many({'$or': [{'recipient': current_username}, {'actor': current_username}]})
+
+    # 7. Hapus keanggotaan komunitas jika ada
+    if hasattr(db, 'community_members'):
+        db.community_members.delete_many({'user_id': current_username})
+
+    # 8. Hapus dokumen akun user
+    db.users.delete_one({'username': current_username})
+
+    response = jsonify({
+        'result': 'success',
+        'msg': 'Akun Anda dan seluruh data terkait telah berhasil dihapus secara permanen.'
+    })
+    response.delete_cookie('mytoken', path='/')
+    return response, 200
+
+
+@app.route('/api/account/logout_all_sessions', methods=['POST'])
+def logout_all_sessions():
+    """
+    Mengakhiri seluruh sesi aktif di semua perangkat dengan menginkrementasikan token_version.
+    """
+    payload = get_current_user_from_token()
+    if not payload:
+        return jsonify({'result': 'fail', 'msg': 'Authentication required'}), 401
+
+    current_username = payload.get('id')
+    user_doc = db.users.find_one({'username': current_username})
+    if not user_doc:
+        return jsonify({'result': 'fail', 'msg': 'User not found'}), 404
+
+    new_version = user_doc.get('token_version', 1) + 1
+    db.users.update_one({'username': current_username}, {'$set': {'token_version': new_version}})
+
+    response = jsonify({
+        'result': 'success',
+        'msg': 'Berhasil keluar dari seluruh sesi di semua perangkat.'
+    })
+    response.delete_cookie('mytoken', path='/')
+    return response, 200
 
 
 # ==========================================
